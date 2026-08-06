@@ -26,6 +26,9 @@ func SetupRouter(
 		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS",
 	}))
 
+	// Serve Web Dashboard Static Files
+	app.Static("/", "./web")
+
 	// Health Check
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{
@@ -43,6 +46,7 @@ func SetupRouter(
 	// Public Product Routes
 	api.Get("/products", productHandler.ListProducts)
 	api.Get("/products/:id", productHandler.GetProductByID)
+	api.Get("/products/:id/stock", productHandler.GetRedisStock)
 
 	// Rate Limiter for Flash Sale Order API
 	orderRateLimiter := middleware.NewRateLimiter(100, 1) // Max 100 requests/sec per IP

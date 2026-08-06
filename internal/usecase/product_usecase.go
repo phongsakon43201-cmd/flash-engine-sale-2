@@ -13,6 +13,7 @@ type ProductUsecase interface {
 	GetProductByID(ctx context.Context, id string) (*domain.Product, error)
 	ListProducts(ctx context.Context) ([]*domain.Product, error)
 	PrewarmStock(ctx context.Context, productID string, stock int) error
+	GetRedisStock(ctx context.Context, productID string) (int, error)
 	GetPresignedUploadURL(ctx context.Context, filename, contentType string) (uploadURL string, fileURL string, err error)
 }
 
@@ -75,6 +76,10 @@ func (u *productUsecase) PrewarmStock(ctx context.Context, productID string, sto
 	}
 
 	return u.cacheRepo.PrewarmStock(ctx, product.ID.Hex(), stock)
+}
+
+func (u *productUsecase) GetRedisStock(ctx context.Context, productID string) (int, error) {
+	return u.cacheRepo.GetStock(ctx, productID)
 }
 
 func (u *productUsecase) GetPresignedUploadURL(ctx context.Context, filename, contentType string) (string, string, error) {

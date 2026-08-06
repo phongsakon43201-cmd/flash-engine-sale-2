@@ -75,6 +75,24 @@ func (h *ProductHandler) PrewarmStock(c *fiber.Ctx) error {
 	})
 }
 
+// GetRedisStock gets the active Redis stock count for a product
+func (h *ProductHandler) GetRedisStock(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return utils.JSONError(c, fiber.StatusBadRequest, "Missing product ID parameter", "")
+	}
+
+	stock, err := h.productUsecase.GetRedisStock(c.Context(), id)
+	if err != nil {
+		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to get Redis stock", err.Error())
+	}
+
+	return utils.JSONSuccess(c, fiber.StatusOK, "Redis stock fetched", fiber.Map{
+		"product_id": id,
+		"stock":      stock,
+	})
+}
+
 // GetS3UploadURL generates Presigned Put URL for S3 image uploads
 func (h *ProductHandler) GetS3UploadURL(c *fiber.Ctx) error {
 	filename := c.Query("filename")

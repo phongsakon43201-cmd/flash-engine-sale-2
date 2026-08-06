@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>High-Concurrency Flash Sale Engine | Live Interactive Demo</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="bg-effects">
+        <div class="glow-orb orb-1"></div>
+        <div class="glow-orb orb-2"></div>
+    </div>
+
+    <div class="container">
+        <!-- Header -->
+        <header class="navbar">
+            <div class="brand">
+                <div class="logo-icon">⚡</div>
+                <div>
+                    <h1>FlashSale Engine <span class="badge badge-tech">Golang + Redis + SQS</span></h1>
+                    <p class="subtitle">High-Concurrency Distributed Order Engine Live Simulator</p>
+                </div>
+            </div>
+            <div class="system-status">
+                <div class="status-indicator online"></div>
+                <span id="systemStatusText">System Operational</span>
+            </div>
+        </header>
+
+        <!-- Metrics Overview Grid -->
+        <div class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-icon">🚀</div>
+                <div class="metric-info">
+                    <span class="metric-label">Redis Stock Pre-warm</span>
+                    <span class="metric-value" id="redisStockValue">--</span>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-icon">⚡</div>
+                <div class="metric-info">
+                    <span class="metric-label">Avg API Latency</span>
+                    <span class="metric-value" id="avgLatencyValue">0 ms</span>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-icon">📦</div>
+                <div class="metric-info">
+                    <span class="metric-label">Orders Processed (202)</span>
+                    <span class="metric-value" id="ordersProcessedCount">0</span>
+                </div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-icon">🛡️</div>
+                <div class="metric-info">
+                    <span class="metric-label">Stock Over-Selling</span>
+                    <span class="metric-value text-success" id="overSellingStatus">0 Items (Guaranteed)</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content Section -->
+        <div class="main-layout">
+            <!-- Left Panel: Product & Flash Sale Simulator -->
+            <section class="card product-card">
+                <div class="card-header">
+                    <h2>🔥 Active Flash Sale Item</h2>
+                    <span class="badge badge-live">LIVE EVENT</span>
+                </div>
+
+                <div class="product-content">
+                    <div class="product-image-box">
+                        <img src="https://images.unsplash.com/photo-1695048133142-1a20484d2569?auto=format&fit=crop&w=600&q=80" alt="iPhone 15 Pro" id="productImage">
+                        <div class="discount-tag">-80% OFF</div>
+                    </div>
+                    
+                    <div class="product-details">
+                        <h3 id="productTitle">iPhone 15 Pro Max 1TB (Titanium)</h3>
+                        <p class="product-desc" id="productDesc">Ultra-high demand flagship smartphone Flash Sale event with atomic inventory control.</p>
+                        
+                        <div class="price-row">
+                            <span class="flash-price">฿9,900</span>
+                            <span class="original-price">฿66,900</span>
+                        </div>
+
+                        <!-- Real-time Stock Bar -->
+                        <div class="stock-container">
+                            <div class="stock-header">
+                                <span>Redis Atomic Stock:</span>
+                                <span class="stock-count-text"><strong id="currentStockDisplay">100</strong> / <span id="initialStockDisplay">100</span> Remaining</span>
+                            </div>
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" id="stockProgressBar" style="width: 100%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Pre-warm Controls -->
+                        <div class="prewarm-control-box">
+                            <label for="prewarmInput">Set Initial Stock (Pre-warm to Redis):</label>
+                            <div class="input-group">
+                                <input type="number" id="prewarmInput" value="50" min="1" max="1000">
+                                <button class="btn btn-secondary" id="btnPrewarm">Pre-warm Stock</button>
+                            </div>
+                        </div>
+
+                        <!-- Action Buttons Grid -->
+                        <div class="action-buttons-group">
+                            <button class="btn btn-primary btn-large btn-glow" id="btnBuySingle">
+                                🛒 Buy Now (1 Request)
+                            </button>
+                            <div class="concurrency-actions">
+                                <p class="action-label">⚡ High-Concurrency Rush Simulator:</p>
+                                <div class="btn-grid">
+                                    <button class="btn btn-outline" id="btnSimulate10">Simulate 10 Concurrent Buyers</button>
+                                    <button class="btn btn-outline" id="btnSimulate50">Simulate 50 Concurrent Buyers</button>
+                                    <button class="btn btn-danger" id="btnSimulate100">🔥 Simulate 100 Concurrent Buyers</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel: Live System Audit Console -->
+            <section class="card audit-card">
+                <div class="card-header">
+                    <h2>🖥️ Live Event & Audit Log Console</h2>
+                    <button class="btn btn-sm btn-text" id="btnClearLogs">Clear Log</button>
+                </div>
+                <div class="console-box" id="consoleLogs">
+                    <div class="log-entry log-system">
+                        <span class="log-time">[System]</span> Engine initialized. Clean Architecture + Fiber + Redis Lua + AWS SQS ready.
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+</body>
+</html>
