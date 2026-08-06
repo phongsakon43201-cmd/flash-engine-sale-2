@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: flashsale-mongodb
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: examplepassword
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: flashsale-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: flashsale-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=sqs,s3
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - ./scripts/init-localstack.sh:/etc/localstack/init/ready.d/init-resources.sh
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api
+    container_name: flashsale-api
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - ENV=production
+      - MONGO_URI=mongodb://root:examplepassword@mongodb:27017
+      - MONGO_DB_NAME=flashsale_db
+      - REDIS_ADDR=redis:6379
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_S3_BUCKET=flashsale-product-images
+      - AWS_SQS_QUEUE_URL=http://localstack:4566/000000000000/flashsale-order-queue
+      - FIREBASE_DEV_MODE=true
+    depends_on:
+      - mongodb
+      - redis
+      - localstack
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    container_name: flashsale-worker
+    environment:
+      - MONGO_URI=mongodb://root:examplepassword@mongodb:27017
+      - MONGO_DB_NAME=flashsale_db
+      - REDIS_ADDR=redis:6379
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_SQS_QUEUE_URL=http://localstack:4566/000000000000/flashsale-order-queue
+    depends_on:
+      - mongodb
+      - redis
+      - localstack
+
+volumes:
+  mongo_data:
+  redis_data:
