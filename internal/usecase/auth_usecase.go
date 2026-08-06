@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"flashsale-go/internal/domain"
 	"flashsale-go/internal/repository/firebase"
 )
 
