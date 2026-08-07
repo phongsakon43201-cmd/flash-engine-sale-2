@@ -41,9 +41,9 @@ func LoadConfig() *Config {
 		AWSRegion:             getEnv("AWS_REGION", "us-east-1"),
 		AWSAccessKeyID:        getEnv("AWS_ACCESS_KEY_ID", "test"),
 		AWSSecretAccessKey:    getEnv("AWS_SECRET_ACCESS_KEY", "test"),
-		AWSEndpoint:           getEnv("AWS_ENDPOINT", "http://localhost:4566"),
+		AWSEndpoint:           getEnv("AWS_ENDPOINT", "http://127.0.0.1:4566"),
 		AWSS3Bucket:           getEnv("AWS_S3_BUCKET", "flashsale-product-images"),
-		AWSSQSQueueURL:        getEnv("AWS_SQS_QUEUE_URL", "http://localhost:4566/000000000000/flashsale-order-queue"),
+		AWSSQSQueueURL:        getEnv("AWS_SQS_QUEUE_URL", "http://127.0.0.1:4566/000000000000/flashsale-order-queue"),
 		FirebaseDevMode:       getEnv("FIREBASE_DEV_MODE", "true") == "true",
 		FirebaseCredsPath:     getEnv("FIREBASE_CREDENTIALS_PATH", ""),
 	}

@@ -28,6 +28,8 @@ type CacheRepository interface {
 	GetStock(ctx context.Context, productID string) (int, error)
 	// DecrementStockAtomic executes Redis Lua Script ensuring zero over-selling
 	DecrementStockAtomic(ctx context.Context, productID string, quantity int) (bool, error)
+	// IncrementStock adds back stock to Redis when order placement/queue fails
+	IncrementStock(ctx context.Context, productID string, quantity int) error
 	// AcquireLock attempts to set a distributed lock with TTL
 	AcquireLock(ctx context.Context, key string, value string, expiration time.Duration) (bool, error)
 	ReleaseLock(ctx context.Context, key string, value string) error

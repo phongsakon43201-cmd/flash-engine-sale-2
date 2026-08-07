@@ -29,6 +29,7 @@ services:
     environment:
       - SERVICES=sqs,s3
       - AWS_DEFAULT_REGION=us-east-1
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-ls-qERiDakO-GOdu-BigA-9962-maZI80155d30}
     volumes:
       - ./scripts/init-localstack.sh:/etc/localstack/init/ready.d/init-resources.sh
 

@@ -81,6 +81,11 @@ func (m *MockCacheRepository) DecrementStockAtomic(ctx context.Context, productI
 	return args.Bool(0), args.Error(1)
 }
 
+func (m *MockCacheRepository) IncrementStock(ctx context.Context, productID string, quantity int) error {
+	args := m.Called(ctx, productID, quantity)
+	return args.Error(0)
+}
+
 func (m *MockCacheRepository) AcquireLock(ctx context.Context, key string, value string, expiration time.Duration) (bool, error) {
 	args := m.Called(ctx, key, value, expiration)
 	return args.Bool(0), args.Error(1)
@@ -167,4 +172,41 @@ func TestCreateFlashSaleOrder_OutOfStock(t *testing.T) {
 	assert.Error(t, err)
 	assert.Nil(t, res)
 	assert.Equal(t, "product out of stock", err.Error())
+}
+
+func TestCreateFlashSaleOrder_QueuePublishFailure_RollsBackStock(t *testing.T) {
+	ctx := context.Background()
+	mockOrderRepo := new(MockOrderRepository)
+	mockProductRepo := new(MockProductRepository)
+	mockCacheRepo := new(MockCacheRepository)
+	mockQueueRepo := new(MockQueueRepository)
+
+	orderUsecase := usecase.NewOrderUsecase(mockOrderRepo, mockProductRepo, mockCacheRepo, mockQueueRepo)
+
+	userID := "user-789"
+	productID := "60d5ecb8b5c9c22b9c8b4567"
+	dto := &domain.CreateOrderDTO{
+		ProductID: productID,
+		Quantity:  1,
+	}
+
+	mockCacheRepo.On("AcquireLock", ctx, mock.Anything, "LOCKED", 10*time.Second).Return(true, nil)
+	mockCacheRepo.On("DecrementStockAtomic", ctx, productID, 1).Return(true, nil)
+	mockProductRepo.On("FindByID", ctx, productID).Return(&domain.Product{
+		Price:       1000,
+		IsFlashSale: true,
+		FlashPrice:  199,
+	}, nil)
+	// Mock queue publish returning error
+	mockQueueRepo.On("PublishOrderEvent", ctx, mock.Anything).Return(assert.AnError)
+	// Verify IncrementStock is called to add +1 back to Redis stock instead of PrewarmStock!
+	mockCacheRepo.On("IncrementStock", ctx, productID, 1).Return(nil)
+
+	res, err := orderUsecase.CreateFlashSaleOrder(ctx, userID, dto)
+
+	assert.Error(t, err)
+	assert.Nil(t, res)
+	assert.Contains(t, err.Error(), "failed to process order queue")
+	mockCacheRepo.AssertExpectations(t)
+	mockQueueRepo.AssertExpectations(t)
 }

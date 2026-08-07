@@ -90,8 +90,8 @@ func (u *orderUsecase) CreateFlashSaleOrder(ctx context.Context, userID string, 
 
 	if err := u.queueRepo.PublishOrderEvent(ctx, event); err != nil {
 		log.Printf("CRITICAL: Failed to publish order event to SQS [OrderID: %s]: %v", orderID, err)
-		// Return stock to Redis in emergency failure case
-		_ = u.cacheRepo.PrewarmStock(ctx, dto.ProductID, dto.Quantity)
+		// Return stock to Redis in emergency failure case (increment back by quantity)
+		_ = u.cacheRepo.IncrementStock(ctx, dto.ProductID, dto.Quantity)
 		return nil, fmt.Errorf("failed to process order queue: %w", err)
 	}
 

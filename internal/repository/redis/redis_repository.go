@@ -84,6 +84,11 @@ func (r *redisRepository) DecrementStockAtomic(ctx context.Context, productID st
 	return resultInt == 1, nil
 }
 
+func (r *redisRepository) IncrementStock(ctx context.Context, productID string, quantity int) error {
+	key := fmt.Sprintf("product:%s:stock", productID)
+	return r.client.IncrBy(ctx, key, int64(quantity)).Err()
+}
+
 func (r *redisRepository) AcquireLock(ctx context.Context, key string, value string, expiration time.Duration) (bool, error) {
 	lockKey := fmt.Sprintf("lock:%s", key)
 	success, err := r.client.SetNX(ctx, lockKey, value, expiration).Result()

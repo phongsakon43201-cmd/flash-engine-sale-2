@@ -203,8 +203,9 @@ document.addEventListener('DOMContentLoaded', () => {
     async function simulateConcurrency(count) {
         logToConsole(`🔥 Initiating High-Concurrency Rush: Firing ${count} simultaneous Requests...`, 'info');
         const promises = [];
+        const runId = Date.now();
         for (let i = 0; i < count; i++) {
-            promises.push(buyFlashSaleOrder(`user-sim-${i + 1}`));
+            promises.push(buyFlashSaleOrder(`user-sim-${runId}-${i + 1}`));
         }
 
         const results = await Promise.all(promises);
