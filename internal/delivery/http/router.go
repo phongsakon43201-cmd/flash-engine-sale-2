@@ -4,6 +4,7 @@ import (
 	"flashsale-go/internal/delivery/http/handler"
 	"flashsale-go/internal/delivery/http/middleware"
 	"flashsale-go/internal/usecase"
+	"flashsale-go/pkg/metrics"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -21,6 +22,7 @@ func SetupRouter(
 	// Middleware Setup
 	app.Use(recover.New())
 	app.Use(logger.New())
+	app.Use(metrics.PrometheusMiddleware())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins: "*",
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
@@ -32,6 +34,9 @@ func SetupRouter(
 
 	// Swagger Endpoint
 	app.Get("/swagger/*", swagger.HandlerDefault)
+
+	// Prometheus Metrics Endpoint
+	app.Get("/metrics", metrics.PrometheusHandler())
 
 	// Health Check
 	app.Get("/health", func(c *fiber.Ctx) error {
