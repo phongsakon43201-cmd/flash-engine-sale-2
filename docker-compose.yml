@@ -110,6 +110,14 @@ services:
     depends_on:
       - prometheus
 
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: flashsale-jaeger
+    restart: always
+    ports:
+      - "16686:16686" # Jaeger Web UI
+      - "4318:4318"   # OTLP HTTP collector
+
 volumes:
   mongo_data:
   redis_data:

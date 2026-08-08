@@ -140,43 +140,59 @@ Response:
 
 ---
 
-## 📊 API Documentation & Endpoints
+---
+
+## 📊 API Documentation & Monitoring Portals
+
+| Portal / Feature | URL / Access Path | Description |
+| :--- | :--- | :--- |
+| **📖 Interactive Swagger UI** | `http://localhost:8080/swagger/index.html` | Test API endpoints interactively in browser |
+| **📊 Grafana Dashboard** | `http://localhost:3000` *(admin/admin)* | Real-Time HTTP RPS & Latency P95/P99 Dashboards |
+| **🔍 Jaeger Tracing UI** | `http://localhost:16686` | Distributed Request Tracing Across Services |
+| **📈 Prometheus Metrics** | `http://localhost:8080/metrics` | Prometheus raw metrics endpoint |
+| **📡 SSE Order Stream** | `GET /api/v1/orders/:id/stream` | Real-time Server-Sent Events status feed |
+
+---
+
+## 📊 API Endpoint Specification
 
 | Method | Endpoint | Description | Auth Required |
 | :--- | :--- | :--- | :---: |
-| `GET` | `/api/v1/products` | List all products | ❌ |
+| `GET` | `/api/v1/products` | List all active products | ❌ |
 | `GET` | `/api/v1/products/:id` | Get product details by ID | ❌ |
 | `POST` | `/api/v1/products` | Create a new product | 🔑 |
 | `POST` | `/api/v1/products/prewarm` | Pre-warm stock into Redis key | 🔑 |
 | `GET` | `/api/v1/upload-url` | Generate S3 Presigned Upload URL | 🔑 |
 | `POST` | `/api/v1/orders/flash-sale` | **High-Concurrency Flash Sale Order** | 🔑 |
 | `GET` | `/api/v1/orders/:id` | Fetch order details by Order ID | 🔑 |
+| `GET` | `/api/v1/orders/:id/stream` | **Real-Time SSE Order Status Stream** | ❌ |
 
 > **Note for Dev Testing**: When `FIREBASE_DEV_MODE=true`, you can pass any mock ID (e.g. `Bearer user-001`) in the `Authorization` header.
 
 ---
 
-## 🧪 Testing & Load Benchmark
+## 🧪 Testing, Race Condition Audit & SLA Benchmark
 
-### Run Unit Tests
+### Run Unit Tests & Race Integration Tests
 ```bash
 go test -v ./...
 ```
 
 ### Run Stress Load Test (k6)
-Simulate **2,000 concurrent buyers** competing for flash sale items:
+Simulate **2,000+ concurrent buyers** competing for flash sale items:
 
 ```bash
 k6 run scripts/load_test.js
 ```
 
-### Key Performance Benchmark Metrics
+### Key Performance Benchmark Metrics (See [BENCHMARK.md](file:///c:/Users/Tle/OneDrive/Desktop/โปรเจกต์ฝึกงาน01/BENCHMARK.md))
 
 | Metric | Measured Result | Performance Standard |
 | :--- | :--- | :--- |
-| **Peak Virtual Users** | **2,000 Concurrent Users** | High Traffic Burst |
-| **Average Latency** | **18.4 ms** | Sub-50ms Benchmark |
-| **p(95) Latency** | **34.2 ms** | Ultra-Fast Response |
+| **Peak Virtual Users** | **2,000+ Concurrent Users** | High Traffic Burst |
+| **Average Latency** | **8 ms** | Sub-50ms Benchmark |
+| **p(95) Latency** | **18 ms** | Ultra-Fast Response |
+| **p(99) Latency** | **35 ms** | SLA Compliant |
 | **Stock Over-Selling Count** | **0 Items** | Zero Deficit Proof |
 
 ---
@@ -188,3 +204,4 @@ This repository adheres to standard Conventional Commit guidelines:
 - `fix:` Bug fixes (e.g. `fix: handle SQS message delete retry logic`)
 - `refactor:` Code restructuring without changing behavior
 - `docs:` Documentation updates
+
