@@ -19,6 +19,17 @@ func NewProductHandler(productUsecase usecase.ProductUsecase) *ProductHandler {
 }
 
 // CreateProduct creates a new product
+// @Summary Create a new product
+// @Description Create product details for store catalog
+// @Tags products
+// @Accept json
+// @Produce json
+// @Param product body domain.CreateProductDTO true "Product payload"
+// @Success 201 {object} utils.Response
+// @Failure 400 {object} utils.Response
+// @Failure 500 {object} utils.Response
+// @Security BearerAuth
+// @Router /products [post]
 func (h *ProductHandler) CreateProduct(c *fiber.Ctx) error {
 	var dto domain.CreateProductDTO
 	if err := c.BodyParser(&dto); err != nil {
@@ -34,6 +45,16 @@ func (h *ProductHandler) CreateProduct(c *fiber.Ctx) error {
 }
 
 // GetProductByID retrieves a product by ID
+// @Summary Get product by ID
+// @Description Retrieve single product detail by ID
+// @Tags products
+// @Accept json
+// @Produce json
+// @Param id path string true "Product ID"
+// @Success 200 {object} utils.Response
+// @Failure 400 {object} utils.Response
+// @Failure 404 {object} utils.Response
+// @Router /products/{id} [get]
 func (h *ProductHandler) GetProductByID(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
@@ -49,6 +70,13 @@ func (h *ProductHandler) GetProductByID(c *fiber.Ctx) error {
 }
 
 // ListProducts retrieves all products
+// @Summary List all products
+// @Description Fetch list of all active products
+// @Tags products
+// @Produce json
+// @Success 200 {object} utils.Response
+// @Failure 500 {object} utils.Response
+// @Router /products [get]
 func (h *ProductHandler) ListProducts(c *fiber.Ctx) error {
 	products, err := h.productUsecase.ListProducts(c.Context())
 	if err != nil {
@@ -59,6 +87,17 @@ func (h *ProductHandler) ListProducts(c *fiber.Ctx) error {
 }
 
 // PrewarmStock pre-populates product stock into Redis cache for Flash Sale
+// @Summary Prewarm product stock in Redis
+// @Description Pre-populate product stock into Redis cache before Flash Sale starts
+// @Tags products
+// @Accept json
+// @Produce json
+// @Param payload body domain.PrewarmStockDTO true "Prewarm Stock DTO"
+// @Success 200 {object} utils.Response
+// @Failure 400 {object} utils.Response
+// @Failure 500 {object} utils.Response
+// @Security BearerAuth
+// @Router /products/prewarm [post]
 func (h *ProductHandler) PrewarmStock(c *fiber.Ctx) error {
 	var dto domain.PrewarmStockDTO
 	if err := c.BodyParser(&dto); err != nil {
@@ -76,6 +115,15 @@ func (h *ProductHandler) PrewarmStock(c *fiber.Ctx) error {
 }
 
 // GetRedisStock gets the active Redis stock count for a product
+// @Summary Get live Redis stock
+// @Description Fetch real-time available stock count from Redis cache
+// @Tags products
+// @Produce json
+// @Param id path string true "Product ID"
+// @Success 200 {object} utils.Response
+// @Failure 400 {object} utils.Response
+// @Failure 500 {object} utils.Response
+// @Router /products/{id}/stock [get]
 func (h *ProductHandler) GetRedisStock(c *fiber.Ctx) error {
 	id := c.Params("id")
 	if id == "" {
@@ -94,6 +142,17 @@ func (h *ProductHandler) GetRedisStock(c *fiber.Ctx) error {
 }
 
 // GetS3UploadURL generates Presigned Put URL for S3 image uploads
+// @Summary Generate S3 presigned upload URL
+// @Description Get presigned S3 upload URL for product image upload
+// @Tags products
+// @Produce json
+// @Param filename query string true "Filename (e.g. image.jpg)"
+// @Param content_type query string false "Content-Type (e.g. image/jpeg)"
+// @Success 200 {object} utils.Response
+// @Failure 400 {object} utils.Response
+// @Failure 500 {object} utils.Response
+// @Security BearerAuth
+// @Router /upload-url [get]
 func (h *ProductHandler) GetS3UploadURL(c *fiber.Ctx) error {
 	filename := c.Query("filename")
 	contentType := c.Query("content_type", "image/jpeg")

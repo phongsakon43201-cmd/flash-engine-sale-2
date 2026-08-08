@@ -1,0 +1,303 @@
+basePath: /api/v1
+definitions:
+  domain.CreateOrderDTO:
+    properties:
+      product_id:
+        type: string
+      quantity:
+        type: integer
+    type: object
+  domain.CreateProductDTO:
+    properties:
+      description:
+        type: string
+      flash_price:
+        type: number
+      image_url:
+        type: string
+      is_flash_sale:
+        type: boolean
+      price:
+        type: number
+      stock:
+        type: integer
+      title:
+        type: string
+    type: object
+  domain.PrewarmStockDTO:
+    properties:
+      product_id:
+        type: string
+      stock:
+        type: integer
+    type: object
+  utils.Response:
+    properties:
+      data: {}
+      error:
+        type: string
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
+host: localhost:8080
+info:
+  contact:
+    name: Flash Sale Support Team
+    url: https://github.com/phongsakontle/flash-engine-sale-
+  description: High-Concurrency Flash Sale Engine REST API Server with Redis Distributed
+    Locks and AWS SQS Event Queue.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: Flash Sale Engine API
+  version: "1.0"
+paths:
+  /orders/{id}:
+    get:
+      description: Fetch order status and details by order ID
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/utils.Response'
+      security:
+      - BearerAuth: []
+      summary: Get order details by ID
+      tags:
+      - orders
+  /orders/flash-sale:
+    post:
+      consumes:
+      - application/json
+      description: Place flash sale order with atomic Redis stock deduction & SQS
+        queueing
+      parameters:
+      - description: Order Request Payload
+        in: body
+        name: order
+        required: true
+        schema:
+          $ref: '#/definitions/domain.CreateOrderDTO'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/utils.Response'
+      security:
+      - BearerAuth: []
+      summary: Place High-Concurrency Flash Sale Order
+      tags:
+      - orders
+  /products:
+    get:
+      description: Fetch list of all active products
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/utils.Response'
+      summary: List all products
+      tags:
+      - products
+    post:
+      consumes:
+      - application/json
+      description: Create product details for store catalog
+      parameters:
+      - description: Product payload
+        in: body
+        name: product
+        required: true
+        schema:
+          $ref: '#/definitions/domain.CreateProductDTO'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/utils.Response'
+      security:
+      - BearerAuth: []
+      summary: Create a new product
+      tags:
+      - products
+  /products/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve single product detail by ID
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/utils.Response'
+      summary: Get product by ID
+      tags:
+      - products
+  /products/{id}/stock:
+    get:
+      description: Fetch real-time available stock count from Redis cache
+      parameters:
+      - description: Product ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/utils.Response'
+      summary: Get live Redis stock
+      tags:
+      - products
+  /products/prewarm:
+    post:
+      consumes:
+      - application/json
+      description: Pre-populate product stock into Redis cache before Flash Sale starts
+      parameters:
+      - description: Prewarm Stock DTO
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/domain.PrewarmStockDTO'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/utils.Response'
+      security:
+      - BearerAuth: []
+      summary: Prewarm product stock in Redis
+      tags:
+      - products
+  /upload-url:
+    get:
+      description: Get presigned S3 upload URL for product image upload
+      parameters:
+      - description: Filename (e.g. image.jpg)
+        in: query
+        name: filename
+        required: true
+        type: string
+      - description: Content-Type (e.g. image/jpeg)
+        in: query
+        name: content_type
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/utils.Response'
+      security:
+      - BearerAuth: []
+      summary: Generate S3 presigned upload URL
+      tags:
+      - products
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer <Firebase-JWT-Token>" to authenticate protected endpoints.
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

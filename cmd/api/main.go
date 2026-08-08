@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	_ "flashsale-go/docs"
 	deliveryHTTP "flashsale-go/internal/delivery/http"
 	awsRepo "flashsale-go/internal/repository/aws"
 	firebaseRepo "flashsale-go/internal/repository/firebase"
@@ -20,6 +21,24 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// @title Flash Sale Engine API
+// @version 1.0
+// @description High-Concurrency Flash Sale Engine REST API Server with Redis Distributed Locks and AWS SQS Event Queue.
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name Flash Sale Support Team
+// @contact.url https://github.com/phongsakontle/flash-engine-sale-
+
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+
+// @host localhost:8080
+// @BasePath /api/v1
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer <Firebase-JWT-Token>" to authenticate protected endpoints.
 func main() {
 	cfg := config.LoadConfig()
 

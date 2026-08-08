@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/gofiber/swagger"
 )
 
 func SetupRouter(
@@ -28,6 +29,9 @@ func SetupRouter(
 
 	// Serve Web Dashboard Static Files
 	app.Static("/", "./web")
+
+	// Swagger Endpoint
+	app.Get("/swagger/*", swagger.HandlerDefault)
 
 	// Health Check
 	app.Get("/health", func(c *fiber.Ctx) error {

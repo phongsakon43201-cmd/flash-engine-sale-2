@@ -1,0 +1,47 @@
+name: Flash Sale Engine CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Install Dependencies
+        run: go mod download
+
+      - name: Verify Dependencies Cleanliness
+        run: go mod verify
+
+      - name: Run Static Code Analysis (go vet)
+        run: go vet ./...
+
+      - name: Build Application Executables
+        run: |
+          go build -v -o bin/api ./cmd/api
+          go build -v -o bin/worker ./cmd/worker
+
+      - name: Run Unit & High-Concurrency Race Tests
+        run: go test -v -race ./...
+        env:
+          REDIS_ADDR: localhost:6379

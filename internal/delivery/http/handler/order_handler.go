@@ -19,6 +19,19 @@ func NewOrderHandler(orderUsecase usecase.OrderUsecase) *OrderHandler {
 }
 
 // CreateFlashSaleOrder handles high-concurrency order placement
+// @Summary Place High-Concurrency Flash Sale Order
+// @Description Place flash sale order with atomic Redis stock deduction & SQS queueing
+// @Tags orders
+// @Accept json
+// @Produce json
+// @Param order body domain.CreateOrderDTO true "Order Request Payload"
+// @Success 202 {object} utils.Response
+// @Failure 400 {object} utils.Response
+// @Failure 401 {object} utils.Response
+// @Failure 429 {object} utils.Response
+// @Failure 500 {object} utils.Response
+// @Security BearerAuth
+// @Router /orders/flash-sale [post]
 func (h *OrderHandler) CreateFlashSaleOrder(c *fiber.Ctx) error {
 	userID, ok := c.Locals("userID").(string)
 	if !ok || userID == "" {
@@ -46,6 +59,16 @@ func (h *OrderHandler) CreateFlashSaleOrder(c *fiber.Ctx) error {
 }
 
 // GetOrderByID retrieves order details
+// @Summary Get order details by ID
+// @Description Fetch order status and details by order ID
+// @Tags orders
+// @Produce json
+// @Param id path string true "Order ID"
+// @Success 200 {object} utils.Response
+// @Failure 400 {object} utils.Response
+// @Failure 404 {object} utils.Response
+// @Security BearerAuth
+// @Router /orders/{id} [get]
 func (h *OrderHandler) GetOrderByID(c *fiber.Ctx) error {
 	orderID := c.Params("id")
 	if orderID == "" {
