@@ -32,6 +32,7 @@ type OrderEventPayload struct {
 	ProductID string    `json:"product_id"`
 	Quantity  int       `json:"quantity"`
 	Price     float64   `json:"price"`
+	TraceID   string    `json:"trace_id,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 }
 

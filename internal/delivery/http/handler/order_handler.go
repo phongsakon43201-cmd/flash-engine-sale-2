@@ -1,6 +1,10 @@
 package handler
 
 import (
+	"bufio"
+	"fmt"
+	"time"
+
 	"flashsale-go/internal/domain"
 	"flashsale-go/internal/usecase"
 	"flashsale-go/pkg/utils"
@@ -81,4 +85,57 @@ func (h *OrderHandler) GetOrderByID(c *fiber.Ctx) error {
 	}
 
 	return utils.JSONSuccess(c, fiber.StatusOK, "Order details fetched successfully", order)
+}
+
+// StreamOrderStatus streams real-time order status via Server-Sent Events (SSE)
+// @Summary Stream Real-Time Order Status (SSE)
+// @Description Real-Time Server-Sent Events stream for order status changes
+// @Tags orders
+// @Produce text/event-stream
+// @Param id path string true "Order ID"
+// @Success 200 {string} string "data: COMPLETED\n\n"
+// @Router /orders/{id}/stream [get]
+func (h *OrderHandler) StreamOrderStatus(c *fiber.Ctx) error {
+	orderID := c.Params("id")
+	if orderID == "" {
+		return utils.JSONError(c, fiber.StatusBadRequest, "Missing order ID parameter", "")
+	}
+
+	c.Set("Content-Type", "text/event-stream")
+	c.Set("Cache-Control", "no-cache")
+	c.Set("Connection", "keep-alive")
+	c.Set("Transfer-Encoding", "chunked")
+
+	ch, cancel, err := h.orderUsecase.SubscribeOrderStatusStream(c.Context(), orderID)
+	if err != nil {
+		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to subscribe order stream", err.Error())
+	}
+
+	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+		defer cancel()
+
+		// Initial PENDING status event
+		_, _ = fmt.Fprintf(w, "data: %s\n\n", domain.OrderStatusPending)
+		_ = w.Flush()
+
+		for {
+			select {
+			case status, ok := <-ch:
+				if !ok {
+					return
+				}
+				_, _ = fmt.Fprintf(w, "data: %s\n\n", status)
+				_ = w.Flush()
+				if status == string(domain.OrderStatusCompleted) || status == string(domain.OrderStatusFailed) {
+					return
+				}
+			case <-time.After(30 * time.Second):
+				// Heartbeat ping to keep connection alive
+				_, _ = fmt.Fprintf(w, ": keep-alive ping\n\n")
+				_ = w.Flush()
+			}
+		}
+	})
+
+	return nil
 }

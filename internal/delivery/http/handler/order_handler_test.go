@@ -41,6 +41,14 @@ func (m *MockOrderUsecase) GetOrderByID(ctx context.Context, orderID string) (*d
 	return args.Get(0).(*domain.Order), args.Error(1)
 }
 
+func (m *MockOrderUsecase) SubscribeOrderStatusStream(ctx context.Context, orderID string) (<-chan string, func(), error) {
+	args := m.Called(ctx, orderID)
+	if args.Get(0) == nil {
+		return nil, func() {}, args.Error(2)
+	}
+	return args.Get(0).(<-chan string), args.Get(1).(func()), args.Error(2)
+}
+
 func TestOrderHandler_CreateFlashSaleOrder_Unauthorized(t *testing.T) {
 	mockUsecase := new(MockOrderUsecase)
 	orderHandler := handler.NewOrderHandler(mockUsecase)

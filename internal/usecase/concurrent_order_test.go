@@ -64,6 +64,16 @@ func (m *ThreadSafeMockCache) ReleaseLock(ctx context.Context, key string, value
 	return nil
 }
 
+func (m *ThreadSafeMockCache) PublishEvent(ctx context.Context, channel string, message string) error {
+	return nil
+}
+
+func (m *ThreadSafeMockCache) SubscribeEvent(ctx context.Context, channel string) (<-chan string, func(), error) {
+	ch := make(chan string)
+	close(ch)
+	return ch, func() {}, nil
+}
+
 func TestCreateFlashSaleOrder_HighConcurrency_ZeroOverselling(t *testing.T) {
 	ctx := context.Background()
 	const initialStock = 10

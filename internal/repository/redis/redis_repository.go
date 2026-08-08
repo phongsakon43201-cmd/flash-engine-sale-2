@@ -102,3 +102,27 @@ func (r *redisRepository) ReleaseLock(ctx context.Context, key string, value str
 	lockKey := fmt.Sprintf("lock:%s", key)
 	return r.client.Eval(ctx, releaseLockLuaScript, []string{lockKey}, value).Err()
 }
+
+func (r *redisRepository) PublishEvent(ctx context.Context, channel string, message string) error {
+	return r.client.Publish(ctx, channel, message).Err()
+}
+
+func (r *redisRepository) SubscribeEvent(ctx context.Context, channel string) (<-chan string, func(), error) {
+	pubsub := r.client.Subscribe(ctx, channel)
+	ch := make(chan string)
+
+	go func() {
+		defer close(ch)
+		for msg := range pubsub.Channel() {
+			if msg != nil {
+				ch <- msg.Payload
+			}
+		}
+	}()
+
+	cancelFunc := func() {
+		_ = pubsub.Close()
+	}
+
+	return ch, cancelFunc, nil
+}

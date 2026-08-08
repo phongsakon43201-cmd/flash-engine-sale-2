@@ -161,6 +161,31 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Real-Time SSE Order Status Subscription
+    function subscribeOrderStatus(orderID) {
+        if (!orderID) return;
+        
+        logToConsole(`📡 [Real-Time SSE] Subscribing live stream for Order: ${orderID}...`, 'info');
+        const eventSource = new EventSource(`/api/v1/orders/${orderID}/stream`);
+
+        eventSource.onmessage = (event) => {
+            const status = event.data;
+            if (status === 'COMPLETED') {
+                logToConsole(`✨ [Real-Time SSE Update] Order ${orderID} status -> 🟢 COMPLETED (Persisted to MongoDB)`, 'success');
+                eventSource.close();
+                fetchLiveStock();
+            } else if (status === 'FAILED') {
+                logToConsole(`⚠️ [Real-Time SSE Update] Order ${orderID} status -> 🔴 FAILED`, 'error');
+                eventSource.close();
+                fetchLiveStock();
+            }
+        };
+
+        eventSource.onerror = (err) => {
+            eventSource.close();
+        };
+    }
+
     // API: Create Flash Sale Order (Single)
     async function buyFlashSaleOrder(userID = `user-${Math.floor(Math.random() * 1000)}`) {
         const startTime = performance.now();
@@ -184,9 +209,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.status === 202) {
                 totalProcessedOrders++;
                 ordersProcessedCount.textContent = totalProcessedOrders;
-                logToConsole(`🚀 HTTP 202 Accepted | Latency: ${duration}ms | OrderID: ${data.data?.order_id || 'N/A'} (Queued via SQS)`, 'success');
+                const orderID = data.data?.order_id || 'N/A';
+                logToConsole(`🚀 HTTP 202 Accepted | Latency: ${duration}ms | OrderID: ${orderID} (Queued via SQS)`, 'success');
+                
+                if (orderID !== 'N/A') {
+                    subscribeOrderStatus(orderID);
+                }
+
                 await fetchLiveStock();
-                return { success: true, latency: duration };
+                return { success: true, latency: duration, orderID };
             } else {
                 logToConsole(`⛔ HTTP ${res.status} Failed | Latency: ${duration}ms | ${data.message || 'Out of Stock'}`, 'error');
                 await fetchLiveStock();

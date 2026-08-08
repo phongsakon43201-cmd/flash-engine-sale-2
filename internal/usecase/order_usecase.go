@@ -9,6 +9,7 @@ import (
 
 	"flashsale-go/internal/domain"
 	"flashsale-go/pkg/metrics"
+	"flashsale-go/pkg/tracer"
 
 	"github.com/google/uuid"
 )
@@ -17,6 +18,7 @@ type OrderUsecase interface {
 	CreateFlashSaleOrder(ctx context.Context, userID string, dto *domain.CreateOrderDTO) (*domain.OrderResponseDTO, error)
 	ProcessOrderFromQueue(ctx context.Context, event *domain.OrderEventPayload) error
 	GetOrderByID(ctx context.Context, orderID string) (*domain.Order, error)
+	SubscribeOrderStatusStream(ctx context.Context, orderID string) (<-chan string, func(), error)
 }
 
 type orderUsecase struct {
@@ -82,17 +84,23 @@ func (u *orderUsecase) CreateFlashSaleOrder(ctx context.Context, userID string, 
 
 	// 4. Construct Order Event Payload & Publish to AWS SQS Queue
 	orderID := "ORD-" + uuid.New().String()
+	traceID := tracer.FromContext(ctx)
+	if traceID == "" {
+		traceID = tracer.NewTraceID()
+	}
+
 	event := &domain.OrderEventPayload{
 		OrderID:   orderID,
 		UserID:    userID,
 		ProductID: dto.ProductID,
 		Quantity:  dto.Quantity,
 		Price:     price,
+		TraceID:   traceID,
 		Timestamp: time.Now(),
 	}
 
 	if err := u.queueRepo.PublishOrderEvent(ctx, event); err != nil {
-		log.Printf("CRITICAL: Failed to publish order event to SQS [OrderID: %s]: %v", orderID, err)
+		log.Printf("[TraceID: %s] CRITICAL: Failed to publish order event to SQS [OrderID: %s]: %v", traceID, orderID, err)
 		// Return stock to Redis in emergency failure case (increment back by quantity)
 		_ = u.cacheRepo.IncrementStock(ctx, dto.ProductID, dto.Quantity)
 		metrics.OrdersPlacedTotal.WithLabelValues("queue_failed").Inc()
@@ -112,7 +120,11 @@ func (u *orderUsecase) CreateFlashSaleOrder(ctx context.Context, userID string, 
 
 // ProcessOrderFromQueue executes asynchronously inside worker engine
 func (u *orderUsecase) ProcessOrderFromQueue(ctx context.Context, event *domain.OrderEventPayload) error {
-	log.Printf("[Worker] Processing order %s for user %s, product %s", event.OrderID, event.UserID, event.ProductID)
+	traceID := event.TraceID
+	if traceID == "" {
+		traceID = "tr-worker-auto"
+	}
+	log.Printf("[Worker TraceID: %s] Processing order %s for user %s, product %s", traceID, event.OrderID, event.UserID, event.ProductID)
 
 	// Idempotency check: Ensure order is not processed multiple times by SQS At-Least-Once delivery
 	idempotencyKey := fmt.Sprintf("idempotency:order:%s", event.OrderID)
@@ -138,6 +150,7 @@ func (u *orderUsecase) ProcessOrderFromQueue(ctx context.Context, event *domain.
 	if err := u.orderRepo.CreateOrder(ctx, order); err != nil {
 		log.Printf("[Worker Error] Failed creating order in DB [OrderID: %s]: %v", event.OrderID, err)
 		metrics.OrdersPlacedTotal.WithLabelValues("db_error").Inc()
+		_ = u.cacheRepo.PublishEvent(ctx, fmt.Sprintf("order:status:%s", event.OrderID), string(domain.OrderStatusFailed))
 		return err
 	}
 
@@ -146,14 +159,21 @@ func (u *orderUsecase) ProcessOrderFromQueue(ctx context.Context, event *domain.
 		log.Printf("[Worker Warning] Stock decrement in DB failed [ProductID: %s]: %v", event.ProductID, err)
 		_ = u.orderRepo.UpdateOrderStatus(ctx, event.OrderID, domain.OrderStatusFailed)
 		metrics.OrdersPlacedTotal.WithLabelValues("stock_db_failed").Inc()
+		_ = u.cacheRepo.PublishEvent(ctx, fmt.Sprintf("order:status:%s", event.OrderID), string(domain.OrderStatusFailed))
 		return err
 	}
 
 	metrics.OrdersPlacedTotal.WithLabelValues("completed").Inc()
+	_ = u.cacheRepo.PublishEvent(ctx, fmt.Sprintf("order:status:%s", event.OrderID), string(domain.OrderStatusCompleted))
 	log.Printf("[Worker Success] Order %s successfully persisted to MongoDB", event.OrderID)
 	return nil
 }
 
 func (u *orderUsecase) GetOrderByID(ctx context.Context, orderID string) (*domain.Order, error) {
 	return u.orderRepo.FindByOrderID(ctx, orderID)
+}
+
+func (u *orderUsecase) SubscribeOrderStatusStream(ctx context.Context, orderID string) (<-chan string, func(), error) {
+	channel := fmt.Sprintf("order:status:%s", orderID)
+	return u.cacheRepo.SubscribeEvent(ctx, channel)
 }

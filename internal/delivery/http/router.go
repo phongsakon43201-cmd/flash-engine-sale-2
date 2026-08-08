@@ -71,4 +71,5 @@ func SetupRouter(
 	// Flash Sale High-Concurrency Order Endpoint
 	protected.Post("/orders/flash-sale", orderRateLimiter, orderHandler.CreateFlashSaleOrder)
 	protected.Get("/orders/:id", orderHandler.GetOrderByID)
+	api.Get("/orders/:id/stream", orderHandler.StreamOrderStatus)
 }

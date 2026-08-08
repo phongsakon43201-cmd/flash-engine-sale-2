@@ -33,6 +33,9 @@ type CacheRepository interface {
 	// AcquireLock attempts to set a distributed lock with TTL
 	AcquireLock(ctx context.Context, key string, value string, expiration time.Duration) (bool, error)
 	ReleaseLock(ctx context.Context, key string, value string) error
+	// Pub/Sub methods for real-time status streaming
+	PublishEvent(ctx context.Context, channel string, message string) error
+	SubscribeEvent(ctx context.Context, channel string) (<-chan string, func(), error)
 }
 
 type QueueRepository interface {

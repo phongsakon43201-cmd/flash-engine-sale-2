@@ -96,6 +96,19 @@ func (m *MockCacheRepository) ReleaseLock(ctx context.Context, key string, value
 	return args.Error(0)
 }
 
+func (m *MockCacheRepository) PublishEvent(ctx context.Context, channel string, message string) error {
+	args := m.Called(ctx, channel, message)
+	return args.Error(0)
+}
+
+func (m *MockCacheRepository) SubscribeEvent(ctx context.Context, channel string) (<-chan string, func(), error) {
+	args := m.Called(ctx, channel)
+	if args.Get(0) == nil {
+		return nil, func() {}, args.Error(2)
+	}
+	return args.Get(0).(<-chan string), args.Get(1).(func()), args.Error(2)
+}
+
 type MockQueueRepository struct {
 	mock.Mock
 }
