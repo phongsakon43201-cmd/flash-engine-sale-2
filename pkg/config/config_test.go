@@ -31,3 +31,36 @@ func TestProductionRejectsWildcardCORS(t *testing.T) {
 	cfg.AllowedOrigins = "*"
 	assert.ErrorContains(t, cfg.Validate(), "ALLOWED_ORIGINS")
 }
+
+func TestMemoryQueueDoesNotRequireSQS(t *testing.T) {
+	cfg := validConfig()
+	cfg.QueueDriver = "memory"
+	cfg.AWSSQSQueueURL = ""
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestManagedRedisURLDoesNotRequireAddress(t *testing.T) {
+	cfg := validConfig()
+	cfg.RedisURL = "rediss://default:secret@example.com:6380"
+	cfg.RedisAddr = ""
+	assert.NoError(t, cfg.Validate())
+}
+
+func TestRejectsUnsupportedRuntimeDrivers(t *testing.T) {
+	cfg := validConfig()
+	cfg.QueueDriver = "unknown"
+	assert.ErrorContains(t, cfg.Validate(), "QUEUE_DRIVER")
+
+	cfg = validConfig()
+	cfg.StorageDriver = "filesystem"
+	assert.ErrorContains(t, cfg.Validate(), "STORAGE_DRIVER")
+}
+
+func TestRenderHostnameBecomesDefaultCORSOrigin(t *testing.T) {
+	t.Setenv("PORT", "10000")
+	t.Setenv("RENDER_EXTERNAL_HOSTNAME", "flashsale-demo.onrender.com")
+	t.Setenv("ALLOWED_ORIGINS", "")
+
+	cfg := LoadConfig()
+	assert.Equal(t, "https://flashsale-demo.onrender.com", cfg.AllowedOrigins)
+}
