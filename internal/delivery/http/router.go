@@ -18,13 +18,14 @@ func SetupRouter(
 	productUsecase usecase.ProductUsecase,
 	orderUsecase usecase.OrderUsecase,
 	authUsecase usecase.AuthUsecase,
+	allowedOrigins string,
 ) {
 	// Middleware Setup
 	app.Use(recover.New())
 	app.Use(logger.New())
 	app.Use(metrics.PrometheusMiddleware())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
+		AllowOrigins: allowedOrigins,
 		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
 		AllowMethods: "GET, POST, PUT, DELETE, OPTIONS",
 	}))
@@ -62,14 +63,15 @@ func SetupRouter(
 
 	// Protected Routes (Require Firebase JWT)
 	protected := api.Group("", middleware.FirebaseAuthMiddleware(authUsecase))
+	adminOnly := middleware.RequireRole("admin", "seller")
 
 	// Admin / Seller Endpoints
-	protected.Post("/products", productHandler.CreateProduct)
-	protected.Post("/products/prewarm", productHandler.PrewarmStock)
-	protected.Get("/upload-url", productHandler.GetS3UploadURL)
+	protected.Post("/products", adminOnly, productHandler.CreateProduct)
+	protected.Post("/products/prewarm", adminOnly, productHandler.PrewarmStock)
+	protected.Get("/upload-url", adminOnly, productHandler.GetS3UploadURL)
 
 	// Flash Sale High-Concurrency Order Endpoint
 	protected.Post("/orders/flash-sale", orderRateLimiter, orderHandler.CreateFlashSaleOrder)
 	protected.Get("/orders/:id", orderHandler.GetOrderByID)
-	api.Get("/orders/:id/stream", orderHandler.StreamOrderStatus)
+	protected.Get("/orders/:id/stream", orderHandler.StreamOrderStatus)
 }

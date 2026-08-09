@@ -15,15 +15,15 @@ const (
 )
 
 type Order struct {
-	ID          primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	OrderID     string             `bson:"order_id" json:"order_id"`
-	UserID      string             `bson:"user_id" json:"user_id"`
-	ProductID   string             `bson:"product_id" json:"product_id"`
-	Quantity    int                `bson:"quantity" json:"quantity"`
-	TotalPrice  float64            `bson:"total_price" json:"total_price"`
-	Status      OrderStatus        `bson:"status" json:"status"`
-	CreatedAt   time.Time          `bson:"created_at" json:"created_at"`
-	UpdatedAt   time.Time          `bson:"updated_at" json:"updated_at"`
+	ID         primitive.ObjectID `bson:"_id,omitempty" json:"id"`
+	OrderID    string             `bson:"order_id" json:"order_id"`
+	UserID     string             `bson:"user_id" json:"user_id"`
+	ProductID  string             `bson:"product_id" json:"product_id"`
+	Quantity   int                `bson:"quantity" json:"quantity"`
+	TotalPrice float64            `bson:"total_price" json:"total_price"`
+	Status     OrderStatus        `bson:"status" json:"status"`
+	CreatedAt  time.Time          `bson:"created_at" json:"created_at"`
+	UpdatedAt  time.Time          `bson:"updated_at" json:"updated_at"`
 }
 
 type OrderEventPayload struct {

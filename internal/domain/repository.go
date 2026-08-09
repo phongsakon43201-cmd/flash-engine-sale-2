@@ -19,6 +19,9 @@ type ProductRepository interface {
 
 type OrderRepository interface {
 	CreateOrder(ctx context.Context, order *Order) error
+	// CreateOrderAndDecrementStock persists the order and inventory change in one MongoDB transaction.
+	// created is false when the order ID was already processed successfully.
+	CreateOrderAndDecrementStock(ctx context.Context, order *Order) (created bool, err error)
 	FindByOrderID(ctx context.Context, orderID string) (*Order, error)
 	UpdateOrderStatus(ctx context.Context, orderID string, status OrderStatus) error
 }

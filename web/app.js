@@ -7,7 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const currentStockDisplay = document.getElementById('currentStockDisplay');
     const initialStockDisplay = document.getElementById('initialStockDisplay');
     const stockProgressBar = document.getElementById('stockProgressBar');
-    
+
     const prewarmInput = document.getElementById('prewarmInput');
     const btnPrewarm = document.getElementById('btnPrewarm');
     const btnBuySingle = document.getElementById('btnBuySingle');
@@ -29,7 +29,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const entry = document.createElement('div');
         const now = new Date().toLocaleTimeString();
         entry.className = `log-entry log-${type}`;
-        entry.innerHTML = `<span class="log-time">[${now}]</span> ${message}`;
+        const timeElement = document.createElement('span');
+        timeElement.className = 'log-time';
+        timeElement.textContent = `[${now}] `;
+        entry.appendChild(timeElement);
+        entry.appendChild(document.createTextNode(String(message)));
         consoleLogs.appendChild(entry);
         consoleLogs.scrollTop = consoleLogs.scrollHeight;
     }
@@ -39,8 +43,10 @@ document.addEventListener('DOMContentLoaded', () => {
         currentStock = stock;
         currentStockDisplay.textContent = stock;
         redisStockValue.textContent = stock;
-        
-        const percentage = Math.max(0, Math.min(100, (stock / initialStock) * 100));
+
+        const percentage = initialStock > 0
+            ? Math.max(0, Math.min(100, (stock / initialStock) * 100))
+            : 0;
         stockProgressBar.style.width = `${percentage}%`;
 
         if (percentage <= 20) {
@@ -65,7 +71,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (res.ok) {
                 const data = await res.json();
                 if (data.data && data.data.length > 0) {
-                    const prod = data.data[0];
+                    const prod = data.data.find(product => product.is_flash_sale) || data.data[0];
                     activeProductID = prod.id;
                     document.getElementById('productTitle').textContent = prod.title;
                     document.getElementById('productDesc').textContent = prod.description || 'Flash sale product';
@@ -89,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer user-admin-001'
+                    'Authorization': 'Bearer admin:dashboard'
                 },
                 body: JSON.stringify({
                     title: 'iPhone 15 Pro Max 1TB (Titanium)',
@@ -130,10 +136,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // API: Pre-warm Stock into Redis
     async function prewarmStock() {
-        const count = parseInt(prewarmInput.value) || 50;
+        const count = Number.parseInt(prewarmInput.value, 10);
+        if (!Number.isInteger(count) || count < 0) {
+            logToConsole('Stock must be a non-negative whole number.', 'error');
+            return;
+        }
         initialStock = count;
         initialStockDisplay.textContent = count;
-        
+
         logToConsole(`Sending Pre-warm request to Redis... (Stock: ${count})`, 'info');
         try {
             const startTime = performance.now();
@@ -141,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer user-admin-001'
+                    'Authorization': 'Bearer admin:dashboard'
                 },
                 body: JSON.stringify({
                     product_id: activeProductID,
@@ -162,28 +172,51 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Real-Time SSE Order Status Subscription
-    function subscribeOrderStatus(orderID) {
+    async function subscribeOrderStatus(orderID, userID) {
         if (!orderID) return;
-        
-        logToConsole(`📡 [Real-Time SSE] Subscribing live stream for Order: ${orderID}...`, 'info');
-        const eventSource = new EventSource(`/api/v1/orders/${orderID}/stream`);
 
-        eventSource.onmessage = (event) => {
-            const status = event.data;
-            if (status === 'COMPLETED') {
-                logToConsole(`✨ [Real-Time SSE Update] Order ${orderID} status -> 🟢 COMPLETED (Persisted to MongoDB)`, 'success');
-                eventSource.close();
-                fetchLiveStock();
-            } else if (status === 'FAILED') {
-                logToConsole(`⚠️ [Real-Time SSE Update] Order ${orderID} status -> 🔴 FAILED`, 'error');
-                eventSource.close();
-                fetchLiveStock();
+        logToConsole(`[Real-Time SSE] Subscribing to Order: ${orderID}...`, 'info');
+        try {
+            const response = await fetch(`/api/v1/orders/${orderID}/stream`, {
+                headers: {
+                    'Accept': 'text/event-stream',
+                    'Authorization': `Bearer ${userID}`
+                }
+            });
+            if (!response.ok || !response.body) {
+                logToConsole(`Order stream failed with HTTP ${response.status}.`, 'error');
+                return;
             }
-        };
 
-        eventSource.onerror = (err) => {
-            eventSource.close();
-        };
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
+                const events = buffer.split('\n\n');
+                buffer = events.pop() || '';
+
+                for (const event of events) {
+                    const dataLine = event.split('\n').find(line => line.startsWith('data:'));
+                    if (!dataLine) continue;
+
+                    const status = dataLine.slice(5).trim();
+                    if (status === 'COMPLETED' || status === 'FAILED') {
+                        const type = status === 'COMPLETED' ? 'success' : 'error';
+                        logToConsole(`Order ${orderID} status -> ${status}`, type);
+                        await reader.cancel();
+                        await fetchLiveStock();
+                        return;
+                    }
+                }
+            }
+        } catch (err) {
+            logToConsole(`Order stream disconnected: ${err.message}`, 'error');
+        }
     }
 
     // API: Create Flash Sale Order (Single)
@@ -211,9 +244,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 ordersProcessedCount.textContent = totalProcessedOrders;
                 const orderID = data.data?.order_id || 'N/A';
                 logToConsole(`🚀 HTTP 202 Accepted | Latency: ${duration}ms | OrderID: ${orderID} (Queued via SQS)`, 'success');
-                
+
                 if (orderID !== 'N/A') {
-                    subscribeOrderStatus(orderID);
+                    void subscribeOrderStatus(orderID, userID);
                 }
 
                 await fetchLiveStock();
@@ -254,7 +287,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnSimulate50.addEventListener('click', () => simulateConcurrency(50));
     btnSimulate100.addEventListener('click', () => simulateConcurrency(100));
     btnClearLogs.addEventListener('click', () => {
-        consoleLogs.innerHTML = '';
+        consoleLogs.replaceChildren();
         logToConsole('Console cleared.', 'system');
     });
 

@@ -7,10 +7,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	"flashsale-go/internal/domain"
 	awsRepo "flashsale-go/internal/repository/aws"
 	mongoRepo "flashsale-go/internal/repository/mongodb"
 	redisRepo "flashsale-go/internal/repository/redis"
-	"flashsale-go/internal/domain"
 	"flashsale-go/internal/usecase"
 	"flashsale-go/pkg/config"
 
@@ -19,6 +19,9 @@ import (
 
 func main() {
 	cfg := config.LoadConfig()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
+	}
 
 	log.Println("Starting Flash Sale Async SQS Consumer Worker...")
 
@@ -27,6 +30,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("[Worker] MongoDB connection failed: %v", err)
 	}
+	defer func() {
+		if err := mongoClient.Client.Disconnect(context.Background()); err != nil {
+			log.Printf("[Worker] MongoDB disconnect failed: %v", err)
+		}
+	}()
 
 	// 2. Initialize Redis Client
 	redisClient := redis.NewClient(&redis.Options{
@@ -34,10 +42,14 @@ func main() {
 		Password: cfg.RedisPassword,
 		DB:       0,
 	})
+	defer func() { _ = redisClient.Close() }()
 
 	// 3. Initialize Repositories
 	productDBRepo := mongoRepo.NewProductRepository(mongoClient.Database)
-	orderDBRepo := mongoRepo.NewOrderRepository(mongoClient.Database)
+	orderDBRepo, err := mongoRepo.NewOrderRepository(mongoClient.Database)
+	if err != nil {
+		log.Fatalf("[Worker] Order repository initialization failed: %v", err)
+	}
 	cacheRepo := redisRepo.NewRedisRepository(redisClient)
 
 	sqsQueueRepo, err := awsRepo.NewSQSRepository(
@@ -54,16 +66,8 @@ func main() {
 	// 4. Initialize Order Usecase
 	orderUsecase := usecase.NewOrderUsecase(orderDBRepo, productDBRepo, cacheRepo, sqsQueueRepo)
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// 5. Graceful shutdown handler
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-quit
-		log.Println("[Worker] Shutting down worker consumer...")
-		cancel()
-	}()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// 6. Start listening to SQS queue messages
 	log.Println("[Worker] Worker loop listening for SQS messages...")
@@ -75,5 +79,6 @@ func main() {
 		log.Printf("[Worker] Consumer loop terminated with error: %v", err)
 	}
 
+	log.Println("[Worker] Shutting down worker consumer...")
 	log.Println("[Worker] Worker successfully shut down.")
 }

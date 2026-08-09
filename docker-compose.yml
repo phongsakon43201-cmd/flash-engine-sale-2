@@ -1,15 +1,32 @@
 services:
   mongodb:
-    image: mongo:6.0
+    image: mongo:7.0
     container_name: flashsale-mongodb
     restart: always
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     ports:
       - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: examplepassword
     volumes:
       - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mongo-init-replica:
+    image: mongo:7.0
+    restart: "no"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    entrypoint:
+      - mongosh
+      - --host
+      - mongodb:27017
+      - --quiet
+      - --eval
+      - "try { rs.status() } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongodb:27017'}]}) }"
 
   redis:
     image: redis:7-alpine
@@ -20,6 +37,11 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
   localstack:
     image: localstack/localstack:latest
@@ -29,9 +51,14 @@ services:
     environment:
       - SERVICES=sqs,s3
       - AWS_DEFAULT_REGION=us-east-1
-      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-ls-qERiDakO-GOdu-BigA-9962-maZI80155d30}
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:-}
     volumes:
       - ./scripts/init-localstack.sh:/etc/localstack/init/ready.d/init-resources.sh
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
 
   api:
     build:
@@ -43,8 +70,8 @@ services:
       - "8080:8080"
     environment:
       - PORT=8080
-      - ENV=production
-      - MONGO_URI=mongodb://root:examplepassword@mongodb:27017
+      - ENV=development
+      - MONGO_URI=mongodb://mongodb:27017/?replicaSet=rs0
       - MONGO_DB_NAME=flashsale_db
       - REDIS_ADDR=redis:6379
       - AWS_REGION=us-east-1
@@ -54,10 +81,14 @@ services:
       - AWS_S3_BUCKET=flashsale-product-images
       - AWS_SQS_QUEUE_URL=http://localstack:4566/000000000000/flashsale-order-queue
       - FIREBASE_DEV_MODE=true
+      - ALLOWED_ORIGINS=http://localhost:8080
     depends_on:
-      - mongodb
-      - redis
-      - localstack
+      mongo-init-replica:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
 
   worker:
     build:
@@ -66,7 +97,7 @@ services:
       target: worker
     container_name: flashsale-worker
     environment:
-      - MONGO_URI=mongodb://root:examplepassword@mongodb:27017
+      - MONGO_URI=mongodb://mongodb:27017/?replicaSet=rs0
       - MONGO_DB_NAME=flashsale_db
       - REDIS_ADDR=redis:6379
       - AWS_REGION=us-east-1
@@ -75,9 +106,12 @@ services:
       - AWS_ENDPOINT=http://localstack:4566
       - AWS_SQS_QUEUE_URL=http://localstack:4566/000000000000/flashsale-order-queue
     depends_on:
-      - mongodb
-      - redis
-      - localstack
+      mongo-init-replica:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
 
   prometheus:
     image: prom/prometheus:v2.50.0
@@ -109,14 +143,6 @@ services:
       - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
-
-  jaeger:
-    image: jaegertracing/all-in-one:latest
-    container_name: flashsale-jaeger
-    restart: always
-    ports:
-      - "16686:16686" # Jaeger Web UI
-      - "4318:4318"   # OTLP HTTP collector
 
 volumes:
   mongo_data:

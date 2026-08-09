@@ -84,6 +84,35 @@ paths:
       summary: Get order details by ID
       tags:
       - orders
+  /orders/{id}/stream:
+    get:
+      description: Real-Time Server-Sent Events stream for order status changes
+      parameters:
+      - description: Order ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - text/event-stream
+      responses:
+        "200":
+          description: 'data: COMPLETED\n\n'
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/utils.Response'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/utils.Response'
+      security:
+      - BearerAuth: []
+      summary: Stream Real-Time Order Status (SSE)
+      tags:
+      - orders
   /orders/flash-sale:
     post:
       consumes:

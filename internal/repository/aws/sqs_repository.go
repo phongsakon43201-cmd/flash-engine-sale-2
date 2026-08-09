@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"flashsale-go/internal/domain"
 
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	awscredentials "github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 )
 
 type sqsRepository struct {
@@ -21,10 +20,7 @@ type sqsRepository struct {
 }
 
 func NewSQSRepository(region, accessKey, secretKey, customEndpoint, queueURL string) (domain.QueueRepository, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(context.TODO(),
-		awsconfig.WithRegion(region),
-		awsconfig.WithCredentialsProvider(awscredentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
-	)
+	cfg, err := loadAWSConfig(context.Background(), region, accessKey, secretKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %w", err)
 	}
@@ -68,35 +64,51 @@ func (r *sqsRepository) ReceiveOrderEvents(ctx context.Context, handler func(eve
 			output, err := r.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
 				QueueUrl:            aws.String(r.queueURL),
 				MaxNumberOfMessages: 10,
-				WaitTimeSeconds:     5, // Long polling
+				WaitTimeSeconds:     10,
+				VisibilityTimeout:   60,
 			})
 			if err != nil {
 				log.Printf("Error receiving messages from SQS: %v. Retrying in 2 seconds...", err)
-				time.Sleep(2 * time.Second)
+				timer := time.NewTimer(2 * time.Second)
+				select {
+				case <-ctx.Done():
+					timer.Stop()
+					return nil
+				case <-timer.C:
+				}
 				continue
 			}
 
-			for _, message := range output.Messages {
-				var payload domain.OrderEventPayload
-				if err := json.Unmarshal([]byte(*message.Body), &payload); err != nil {
-					log.Printf("Failed to unmarshal SQS message body: %v", err)
-					continue
-				}
+			var wg sync.WaitGroup
+			for i := range output.Messages {
+				message := output.Messages[i]
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if message.Body == nil || message.ReceiptHandle == nil {
+						log.Printf("Received malformed SQS message metadata")
+						return
+					}
 
-				if err := handler(&payload); err != nil {
-					log.Printf("Failed processing SQS order event [ID: %s]: %v", payload.OrderID, err)
-					continue
-				}
+					var payload domain.OrderEventPayload
+					if err := json.Unmarshal([]byte(*message.Body), &payload); err != nil {
+						log.Printf("Failed to unmarshal SQS message body: %v", err)
+						return
+					}
+					if err := handler(&payload); err != nil {
+						log.Printf("Failed processing SQS order event [ID: %s]: %v", payload.OrderID, err)
+						return
+					}
 
-				// Delete message after successful processing
-				_, err := r.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
-					QueueUrl:      aws.String(r.queueURL),
-					ReceiptHandle: message.ReceiptHandle,
-				})
-				if err != nil {
-					log.Printf("Failed deleting message from SQS [ReceiptHandle: %s]: %v", *message.ReceiptHandle, err)
-				}
+					if _, err := r.client.DeleteMessage(ctx, &sqs.DeleteMessageInput{
+						QueueUrl:      aws.String(r.queueURL),
+						ReceiptHandle: message.ReceiptHandle,
+					}); err != nil {
+						log.Printf("Failed deleting SQS message: %v", err)
+					}
+				}()
 			}
+			wg.Wait()
 		}
 	}
 }

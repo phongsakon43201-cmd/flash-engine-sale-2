@@ -1,6 +1,8 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
+http.setResponseCallback(http.expectedStatuses(202, 400, 429));
+
 export const options = {
   stages: [
     { duration: '5s', target: 500 },   // Ramp up to 500 virtual users
@@ -9,7 +11,7 @@ export const options = {
   ],
   thresholds: {
     http_req_duration: ['p(95)<100'], // 95% of requests must complete below 100ms
-    http_req_failed: ['rate<0.01'],    // Error rate must be less than 1%
+    http_req_failed: ['rate<0.01'],    // Expected sold-out and rate-limit responses are not transport failures
   },
 };
 
@@ -35,7 +37,7 @@ export default function () {
   const res = http.post(url, payload, params);
 
   check(res, {
-    'status is 202 Accepted or 400 Out of Stock': (r) => r.status === 202 || (r.status === 400 && r.body.includes('out of stock')),
+    'status is accepted, sold out, or rate limited': (r) => r.status === 202 || r.status === 400 || r.status === 429,
     'response time < 50ms': (r) => r.timings.duration < 50,
   });
 

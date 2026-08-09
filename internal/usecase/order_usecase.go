@@ -14,6 +14,14 @@ import (
 	"github.com/google/uuid"
 )
 
+var (
+	ErrInvalidOrder    = errors.New("invalid order request")
+	ErrInvalidQuantity = errors.New("quantity must be between 1 and 10")
+	ErrNotFlashSale    = errors.New("product is not available for flash sale")
+	ErrOutOfStock      = errors.New("product out of stock")
+	ErrDuplicateOrder  = errors.New("order processing in progress, please do not double click")
+)
+
 type OrderUsecase interface {
 	CreateFlashSaleOrder(ctx context.Context, userID string, dto *domain.CreateOrderDTO) (*domain.OrderResponseDTO, error)
 	ProcessOrderFromQueue(ctx context.Context, event *domain.OrderEventPayload) error
@@ -43,24 +51,40 @@ func NewOrderUsecase(
 }
 
 func (u *orderUsecase) CreateFlashSaleOrder(ctx context.Context, userID string, dto *domain.CreateOrderDTO) (*domain.OrderResponseDTO, error) {
-	if dto.ProductID == "" {
-		return nil, errors.New("product ID is required")
+	if dto == nil || userID == "" || dto.ProductID == "" {
+		return nil, ErrInvalidOrder
 	}
-	if dto.Quantity <= 0 {
-		dto.Quantity = 1
+	if dto.Quantity < 1 || dto.Quantity > 10 {
+		return nil, ErrInvalidQuantity
 	}
 
-	// 1. Prevent duplicate purchase per user for the flash sale item (10s TTL Lock)
+	// Load and validate the product before reserving inventory. Never enqueue a zero-price order.
+	product, err := u.productRepo.FindByID(ctx, dto.ProductID)
+	if err != nil {
+		return nil, fmt.Errorf("load product: %w", err)
+	}
+	if product == nil || !product.IsFlashSale || product.FlashPrice <= 0 {
+		return nil, ErrNotFlashSale
+	}
+
+	// Prevent accidental double clicks while the first request is being accepted.
 	userLockKey := fmt.Sprintf("user:%s:product:%s:lock", userID, dto.ProductID)
-	acquired, err := u.cacheRepo.AcquireLock(ctx, userLockKey, "LOCKED", 10*time.Second)
+	lockToken := uuid.NewString()
+	acquired, err := u.cacheRepo.AcquireLock(ctx, userLockKey, lockToken, 10*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed checking user lock: %w", err)
 	}
 	if !acquired {
-		return nil, errors.New("order processing in progress, please do not double click")
+		return nil, ErrDuplicateOrder
 	}
+	keepLock := false
+	defer func() {
+		if !keepLock {
+			_ = u.cacheRepo.ReleaseLock(context.Background(), userLockKey, lockToken)
+		}
+	}()
 
-	// 2. Atomic Stock Decrement via Redis Lua Script (Zero Race Condition / Zero Over-selling)
+	// Reserve inventory atomically in Redis.
 	decremented, err := u.cacheRepo.DecrementStockAtomic(ctx, dto.ProductID, dto.Quantity)
 	if err != nil {
 		metrics.OrdersPlacedTotal.WithLabelValues("error").Inc()
@@ -68,21 +92,10 @@ func (u *orderUsecase) CreateFlashSaleOrder(ctx context.Context, userID string, 
 	}
 	if !decremented {
 		metrics.OrdersPlacedTotal.WithLabelValues("out_of_stock").Inc()
-		return nil, errors.New("product out of stock")
+		return nil, ErrOutOfStock
 	}
 
-	// 3. Get product price details (or use cached price)
-	product, err := u.productRepo.FindByID(ctx, dto.ProductID)
-	price := 0.0
-	if err == nil && product != nil {
-		if product.IsFlashSale && product.FlashPrice > 0 {
-			price = product.FlashPrice
-		} else {
-			price = product.Price
-		}
-	}
-
-	// 4. Construct Order Event Payload & Publish to AWS SQS Queue
+	// Construct the immutable order event and publish it to SQS.
 	orderID := "ORD-" + uuid.New().String()
 	traceID := tracer.FromContext(ctx)
 	if traceID == "" {
@@ -94,19 +107,23 @@ func (u *orderUsecase) CreateFlashSaleOrder(ctx context.Context, userID string, 
 		UserID:    userID,
 		ProductID: dto.ProductID,
 		Quantity:  dto.Quantity,
-		Price:     price,
+		Price:     product.FlashPrice,
 		TraceID:   traceID,
 		Timestamp: time.Now(),
 	}
 
 	if err := u.queueRepo.PublishOrderEvent(ctx, event); err != nil {
 		log.Printf("[TraceID: %s] CRITICAL: Failed to publish order event to SQS [OrderID: %s]: %v", traceID, orderID, err)
-		// Return stock to Redis in emergency failure case (increment back by quantity)
-		_ = u.cacheRepo.IncrementStock(ctx, dto.ProductID, dto.Quantity)
+		// Return stock to Redis when the durable queue did not accept the event.
+		if rollbackErr := u.cacheRepo.IncrementStock(ctx, dto.ProductID, dto.Quantity); rollbackErr != nil {
+			log.Printf("[TraceID: %s] CRITICAL: Failed to restore Redis stock [OrderID: %s]: %v", traceID, orderID, rollbackErr)
+			err = errors.Join(err, fmt.Errorf("restore reserved stock: %w", rollbackErr))
+		}
 		metrics.OrdersPlacedTotal.WithLabelValues("queue_failed").Inc()
 		return nil, fmt.Errorf("failed to process order queue: %w", err)
 	}
 
+	keepLock = true
 	metrics.OrdersPlacedTotal.WithLabelValues("accepted").Inc()
 
 	// 5. Return HTTP 202 Accepted response immediately (~15-30ms latency)
@@ -120,47 +137,38 @@ func (u *orderUsecase) CreateFlashSaleOrder(ctx context.Context, userID string, 
 
 // ProcessOrderFromQueue executes asynchronously inside worker engine
 func (u *orderUsecase) ProcessOrderFromQueue(ctx context.Context, event *domain.OrderEventPayload) error {
+	if event == nil || event.OrderID == "" || event.UserID == "" || event.ProductID == "" || event.Quantity < 1 || event.Quantity > 10 || event.Price <= 0 {
+		return errors.New("invalid order event payload")
+	}
+
 	traceID := event.TraceID
 	if traceID == "" {
 		traceID = "tr-worker-auto"
 	}
 	log.Printf("[Worker TraceID: %s] Processing order %s for user %s, product %s", traceID, event.OrderID, event.UserID, event.ProductID)
 
-	// Idempotency check: Ensure order is not processed multiple times by SQS At-Least-Once delivery
-	idempotencyKey := fmt.Sprintf("idempotency:order:%s", event.OrderID)
-	acquired, err := u.cacheRepo.AcquireLock(ctx, idempotencyKey, "PROCESSED", 24*time.Hour)
-	if err == nil && !acquired {
-		log.Printf("[Worker Idempotency] Order %s was already processed. Skipping duplicate execution.", event.OrderID)
-		metrics.OrdersPlacedTotal.WithLabelValues("duplicate_skipped").Inc()
-		return nil
-	}
-
-	// 1. Create order record in MongoDB
+	// MongoDB transaction + unique order_id index provide durable idempotency.
 	order := &domain.Order{
 		OrderID:    event.OrderID,
 		UserID:     event.UserID,
 		ProductID:  event.ProductID,
 		Quantity:   event.Quantity,
 		TotalPrice: event.Price * float64(event.Quantity),
-		Status:     domain.OrderStatusCompleted,
+		Status:     domain.OrderStatusPending,
 		CreatedAt:  event.Timestamp,
 		UpdatedAt:  time.Now(),
 	}
 
-	if err := u.orderRepo.CreateOrder(ctx, order); err != nil {
-		log.Printf("[Worker Error] Failed creating order in DB [OrderID: %s]: %v", event.OrderID, err)
+	created, err := u.orderRepo.CreateOrderAndDecrementStock(ctx, order)
+	if err != nil {
+		log.Printf("[Worker Error] Failed processing order transaction [OrderID: %s]: %v", event.OrderID, err)
 		metrics.OrdersPlacedTotal.WithLabelValues("db_error").Inc()
-		_ = u.cacheRepo.PublishEvent(ctx, fmt.Sprintf("order:status:%s", event.OrderID), string(domain.OrderStatusFailed))
 		return err
 	}
-
-	// 2. Decrement persistent MongoDB database stock
-	if err := u.productRepo.DecrementStock(ctx, event.ProductID, event.Quantity); err != nil {
-		log.Printf("[Worker Warning] Stock decrement in DB failed [ProductID: %s]: %v", event.ProductID, err)
-		_ = u.orderRepo.UpdateOrderStatus(ctx, event.OrderID, domain.OrderStatusFailed)
-		metrics.OrdersPlacedTotal.WithLabelValues("stock_db_failed").Inc()
-		_ = u.cacheRepo.PublishEvent(ctx, fmt.Sprintf("order:status:%s", event.OrderID), string(domain.OrderStatusFailed))
-		return err
+	if !created {
+		metrics.OrdersPlacedTotal.WithLabelValues("duplicate_skipped").Inc()
+		_ = u.cacheRepo.PublishEvent(ctx, fmt.Sprintf("order:status:%s", event.OrderID), string(domain.OrderStatusCompleted))
+		return nil
 	}
 
 	metrics.OrdersPlacedTotal.WithLabelValues("completed").Inc()

@@ -7,10 +7,8 @@ import (
 
 	"flashsale-go/internal/domain"
 
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
-	awscredentials "github.com/aws/aws-sdk-go-v2/credentials"
-	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 type s3Repository struct {
@@ -20,10 +18,7 @@ type s3Repository struct {
 }
 
 func NewS3Repository(region, accessKey, secretKey, customEndpoint, bucketName string) (domain.StorageRepository, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(context.TODO(),
-		awsconfig.WithRegion(region),
-		awsconfig.WithCredentialsProvider(awscredentials.NewStaticCredentialsProvider(accessKey, secretKey, "")),
-	)
+	cfg, err := loadAWSConfig(context.Background(), region, accessKey, secretKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS S3 config: %w", err)
 	}

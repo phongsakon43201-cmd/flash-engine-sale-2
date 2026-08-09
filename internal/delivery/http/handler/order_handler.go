@@ -2,7 +2,9 @@ package handler
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"flashsale-go/internal/domain"
@@ -49,13 +51,17 @@ func (h *OrderHandler) CreateFlashSaleOrder(c *fiber.Ctx) error {
 
 	res, err := h.orderUsecase.CreateFlashSaleOrder(c.Context(), userID, &dto)
 	if err != nil {
-		if err.Error() == "product out of stock" {
+		if errors.Is(err, usecase.ErrOutOfStock) {
 			return utils.JSONError(c, fiber.StatusBadRequest, "Out of stock", "The flash sale item has sold out")
 		}
-		if err.Error() == "order processing in progress, please do not double click" {
+		if errors.Is(err, usecase.ErrDuplicateOrder) {
 			return utils.JSONError(c, fiber.StatusTooManyRequests, "Duplicate request", err.Error())
 		}
-		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to place flash sale order", err.Error())
+		if errors.Is(err, usecase.ErrInvalidOrder) || errors.Is(err, usecase.ErrInvalidQuantity) || errors.Is(err, usecase.ErrNotFlashSale) {
+			return utils.JSONError(c, fiber.StatusBadRequest, "Invalid order", err.Error())
+		}
+		log.Printf("Failed to place flash sale order: %v", err)
+		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to place flash sale order", "Unable to process the order")
 	}
 
 	// 202 Accepted return status
@@ -81,7 +87,10 @@ func (h *OrderHandler) GetOrderByID(c *fiber.Ctx) error {
 
 	order, err := h.orderUsecase.GetOrderByID(c.Context(), orderID)
 	if err != nil {
-		return utils.JSONError(c, fiber.StatusNotFound, "Order not found", err.Error())
+		return utils.JSONError(c, fiber.StatusNotFound, "Order not found", "The requested order was not found")
+	}
+	if !canAccessOrder(c, order) {
+		return utils.JSONError(c, fiber.StatusNotFound, "Order not found", "The requested order was not found")
 	}
 
 	return utils.JSONSuccess(c, fiber.StatusOK, "Order details fetched successfully", order)
@@ -94,13 +103,19 @@ func (h *OrderHandler) GetOrderByID(c *fiber.Ctx) error {
 // @Produce text/event-stream
 // @Param id path string true "Order ID"
 // @Success 200 {string} string "data: COMPLETED\n\n"
+// @Failure 401 {object} utils.Response
+// @Failure 404 {object} utils.Response
+// @Security BearerAuth
 // @Router /orders/{id}/stream [get]
 func (h *OrderHandler) StreamOrderStatus(c *fiber.Ctx) error {
 	orderID := c.Params("id")
 	if orderID == "" {
 		return utils.JSONError(c, fiber.StatusBadRequest, "Missing order ID parameter", "")
 	}
-
+	order, err := h.orderUsecase.GetOrderByID(c.Context(), orderID)
+	if err != nil || !canAccessOrder(c, order) {
+		return utils.JSONError(c, fiber.StatusNotFound, "Order not found", "The requested order was not found")
+	}
 	c.Set("Content-Type", "text/event-stream")
 	c.Set("Cache-Control", "no-cache")
 	c.Set("Connection", "keep-alive")
@@ -113,10 +128,16 @@ func (h *OrderHandler) StreamOrderStatus(c *fiber.Ctx) error {
 
 	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
 		defer cancel()
+		heartbeat := time.NewTicker(30 * time.Second)
+		defer heartbeat.Stop()
 
 		// Initial PENDING status event
-		_, _ = fmt.Fprintf(w, "data: %s\n\n", domain.OrderStatusPending)
-		_ = w.Flush()
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", domain.OrderStatusPending); err != nil {
+			return
+		}
+		if err := w.Flush(); err != nil {
+			return
+		}
 
 		for {
 			select {
@@ -124,18 +145,35 @@ func (h *OrderHandler) StreamOrderStatus(c *fiber.Ctx) error {
 				if !ok {
 					return
 				}
-				_, _ = fmt.Fprintf(w, "data: %s\n\n", status)
-				_ = w.Flush()
+				if _, err := fmt.Fprintf(w, "data: %s\n\n", status); err != nil {
+					return
+				}
+				if err := w.Flush(); err != nil {
+					return
+				}
 				if status == string(domain.OrderStatusCompleted) || status == string(domain.OrderStatusFailed) {
 					return
 				}
-			case <-time.After(30 * time.Second):
+			case <-heartbeat.C:
 				// Heartbeat ping to keep connection alive
-				_, _ = fmt.Fprintf(w, ": keep-alive ping\n\n")
-				_ = w.Flush()
+				if _, err := fmt.Fprint(w, ": keep-alive ping\n\n"); err != nil {
+					return
+				}
+				if err := w.Flush(); err != nil {
+					return
+				}
 			}
 		}
 	})
 
 	return nil
+}
+
+func canAccessOrder(c *fiber.Ctx, order *domain.Order) bool {
+	role, _ := c.Locals("userRole").(string)
+	if role == "admin" || role == "seller" {
+		return true
+	}
+	userID, _ := c.Locals("userID").(string)
+	return userID != "" && order != nil && order.UserID == userID
 }
