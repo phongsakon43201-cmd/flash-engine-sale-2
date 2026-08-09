@@ -9,17 +9,36 @@ import (
 	"flashsale-go/internal/domain"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
 type orderRepository struct {
-	collection *mongo.Collection
+	client            *mongo.Client
+	collection        *mongo.Collection
+	productCollection *mongo.Collection
 }
 
-func NewOrderRepository(db *mongo.Database) domain.OrderRepository {
-	return &orderRepository{
-		collection: db.Collection("orders"),
+func NewOrderRepository(db *mongo.Database) (domain.OrderRepository, error) {
+	collection := db.Collection("orders")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_, err := collection.Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys:    bson.D{{Key: "order_id", Value: 1}},
+		Options: options.Index().SetUnique(true).SetName("uniq_order_id"),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create order indexes: %w", err)
 	}
+
+	return &orderRepository{
+		client:            db.Client(),
+		collection:        collection,
+		productCollection: db.Collection("products"),
+	}, nil
 }
 
 func (r *orderRepository) CreateOrder(ctx context.Context, order *domain.Order) error {
@@ -32,6 +51,67 @@ func (r *orderRepository) CreateOrder(ctx context.Context, order *domain.Order) 
 	}
 
 	return nil
+}
+
+func (r *orderRepository) CreateOrderAndDecrementStock(ctx context.Context, order *domain.Order) (bool, error) {
+	session, err := r.client.StartSession()
+	if err != nil {
+		return false, fmt.Errorf("start MongoDB session: %w", err)
+	}
+	defer session.EndSession(ctx)
+
+	txnOptions := options.Transaction().SetWriteConcern(writeconcern.Majority())
+	result, err := session.WithTransaction(ctx, func(sessionCtx mongo.SessionContext) (interface{}, error) {
+		var existing domain.Order
+		err := r.collection.FindOne(sessionCtx, bson.M{"order_id": order.OrderID}).Decode(&existing)
+		if err == nil {
+			return false, nil
+		}
+		if !errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, fmt.Errorf("check existing order: %w", err)
+		}
+
+		productID, err := primitive.ObjectIDFromHex(order.ProductID)
+		if err != nil {
+			return nil, errors.New("invalid product ID format")
+		}
+
+		stockResult, err := r.productCollection.UpdateOne(
+			sessionCtx,
+			bson.M{"_id": productID, "stock": bson.M{"$gte": order.Quantity}},
+			bson.M{
+				"$inc": bson.M{"stock": -order.Quantity},
+				"$set": bson.M{"updated_at": time.Now().UTC()},
+			},
+		)
+		if err != nil {
+			return nil, fmt.Errorf("decrement product stock: %w", err)
+		}
+		if stockResult.ModifiedCount != 1 {
+			return nil, errors.New("insufficient MongoDB stock or product not found")
+		}
+
+		now := time.Now().UTC()
+		order.Status = domain.OrderStatusCompleted
+		if order.CreatedAt.IsZero() {
+			order.CreatedAt = now
+		}
+		order.UpdatedAt = now
+		if _, err := r.collection.InsertOne(sessionCtx, order); err != nil {
+			return nil, fmt.Errorf("insert order: %w", err)
+		}
+
+		return true, nil
+	}, txnOptions)
+	if err != nil {
+		return false, fmt.Errorf("process order transaction: %w", err)
+	}
+
+	created, ok := result.(bool)
+	if !ok {
+		return false, errors.New("unexpected MongoDB transaction result")
+	}
+	return created, nil
 }
 
 func (r *orderRepository) FindByOrderID(ctx context.Context, orderID string) (*domain.Order, error) {
@@ -61,8 +141,8 @@ func (r *orderRepository) UpdateOrderStatus(ctx context.Context, orderID string,
 		return fmt.Errorf("failed to update order status: %w", err)
 	}
 
-	if res.ModifiedCount == 0 {
-		return errors.New("order not found or status unchanged")
+	if res.MatchedCount == 0 {
+		return errors.New("order not found")
 	}
 
 	return nil

@@ -1,10 +1,10 @@
 # 🚀 High-Concurrency Order & Flash Sale Engine (Golang)
 
-[![Go Version](https://img.shields.io/badge/Go-1.22+-00ADD8?style=for-the-badge&logo=go)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=for-the-badge&logo=go)](https://go.dev)
 [![Architecture](https://img.shields.io/badge/Architecture-Clean%20Architecture-blue?style=for-the-badge)](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
 [![Docker Compose](https://img.shields.io/badge/Docker%20Compose-Ready-2496ED?style=for-the-badge&logo=docker)](https://www.docker.com/)
 
-A production-ready, ultra-high concurrency **Flash Sale & E-Commerce Order Engine** built in **Golang** following **Clean Architecture**. Designed to handle **10,000+ simultaneous purchase requests** without server crash or stock over-selling (Zero stock sub-zero).
+A production-oriented reference implementation of a **Flash Sale & E-Commerce Order Engine** built in **Go** with Clean Architecture. Redis provides atomic inventory reservation, SQS buffers traffic spikes, and the worker commits the order plus persistent inventory change in one MongoDB transaction.
 
 ---
 
@@ -25,18 +25,17 @@ sequenceDiagram
     API->>Auth: Verify JWT Token
     Auth-->>API: Valid User Claims
     API->>Redis: Execute Atomic Decrement Lua Script (product:{id}:stock)
-    
+
     alt Stock Available (Stock >= 1)
         Redis-->>API: Success (Stock Decremented)
         API->>SQS: Publish Order Event Payload
         SQS-->>API: Event Queued
         API-->>Client: HTTP 202 Accepted (Latency 15-30ms)
-        
+
         par Async Background Persistence
             Worker->>SQS: Poll Messages (Long Polling)
             SQS-->>Worker: Order Event Message
-            Worker->>Mongo: Create Order (Status: COMPLETED)
-            Worker->>Mongo: Decrement Persistent DB Stock
+            Worker->>Mongo: Transaction: decrement stock + create completed order
             Worker->>SQS: Delete Message (Ack)
         end
     else Stock Out (Stock == 0)
@@ -50,9 +49,9 @@ sequenceDiagram
 ## 🌟 Key Technical Highlights
 
 1. **Clean Architecture Blueprint**: Strict separation of concerns between `domain`, `usecase`, `repository`, and `delivery`. Easily testable with mocks.
-2. **Zero Over-Selling Guarantee**: Utilizes **Redis Atomic Lua Scripts** (`DECRBY` with check) to prevent race conditions during high concurrent traffic spikes.
+2. **Atomic Inventory Reservation**: Uses a Redis Lua script (`DECRBY` with a stock check) so concurrent API requests cannot drive Redis inventory below zero.
 3. **Event-Driven Asynchronous Pipeline**: API responds with `HTTP 202 Accepted` within 15-30ms by delegating persistent DB operations to **AWS SQS** message queues.
-4. **Resilient Background Worker Engine**: Isolated Go worker process polling SQS with long-polling and graceful shutdown mechanics to update **MongoDB** persistent stock and create order audit logs.
+4. **Resilient Background Worker Engine**: Processes SQS batches concurrently and uses a MongoDB transaction plus a unique `order_id` index for durable idempotency. Failed messages are retried and moved to a DLQ after three receives.
 5. **Security & Media**: Integrated Firebase JWT authentication middleware and **AWS S3 Presigned URLs** for direct client-side product image uploads without proxying payload through API servers.
 
 ---
@@ -61,7 +60,7 @@ sequenceDiagram
 
 | Module / Component | Technology / Library | Purpose & Rationale |
 | :--- | :--- | :--- |
-| **Language** | Golang 1.22 | High performance, lightweight goroutines, sub-millisecond execution |
+| **Language** | Go 1.25 | High performance, lightweight goroutines, sub-millisecond execution |
 | **HTTP Framework** | Fiber v2 | Express-like syntax with FastHTTP engine under the hood |
 | **Primary Database** | MongoDB (mongo-go-driver) | Flexible document model for e-commerce catalog & order histories |
 | **Cache & Lock** | Redis (go-redis/v9) | In-memory stock pre-warming & atomic Lua script execution |
@@ -123,7 +122,7 @@ flashsale-go/
 Run the following single command to start MongoDB, Redis, LocalStack (SQS & S3), Fiber API, and Worker Engine:
 
 ```bash
-docker-compose up --build -d
+docker compose up --build -d
 ```
 
 ### 2. Check Health Status
@@ -148,7 +147,6 @@ Response:
 | :--- | :--- | :--- |
 | **📖 Interactive Swagger UI** | `http://localhost:8080/swagger/index.html` | Test API endpoints interactively in browser |
 | **📊 Grafana Dashboard** | `http://localhost:3000` *(admin/admin)* | Real-Time HTTP RPS & Latency P95/P99 Dashboards |
-| **🔍 Jaeger Tracing UI** | `http://localhost:16686` | Distributed Request Tracing Across Services |
 | **📈 Prometheus Metrics** | `http://localhost:8080/metrics` | Prometheus raw metrics endpoint |
 | **📡 SSE Order Stream** | `GET /api/v1/orders/:id/stream` | Real-time Server-Sent Events status feed |
 
@@ -165,9 +163,9 @@ Response:
 | `GET` | `/api/v1/upload-url` | Generate S3 Presigned Upload URL | 🔑 |
 | `POST` | `/api/v1/orders/flash-sale` | **High-Concurrency Flash Sale Order** | 🔑 |
 | `GET` | `/api/v1/orders/:id` | Fetch order details by Order ID | 🔑 |
-| `GET` | `/api/v1/orders/:id/stream` | **Real-Time SSE Order Status Stream** | ❌ |
+| `GET` | `/api/v1/orders/:id/stream` | **Real-Time SSE Order Status Stream** | 🔑 |
 
-> **Note for Dev Testing**: When `FIREBASE_DEV_MODE=true`, you can pass any mock ID (e.g. `Bearer user-001`) in the `Authorization` header.
+> **Note for Dev Testing**: When `FIREBASE_DEV_MODE=true`, use any mock customer ID (for example, `Bearer user-001`). Admin-only endpoints require the `admin:` prefix (for example, `Bearer admin:dashboard`). Development tokens are rejected when `ENV=production`.
 
 ---
 
@@ -185,17 +183,9 @@ Simulate **2,000+ concurrent buyers** competing for flash sale items:
 k6 run scripts/load_test.js
 ```
 
-### Key Performance Benchmark Metrics (See [BENCHMARK.md](file:///c:/Users/Tle/OneDrive/Desktop/โปรเจกต์ฝึกงาน01/BENCHMARK.md))
+### Benchmark methodology
 
-| Metric | Measured Result | Performance Standard |
-| :--- | :--- | :--- |
-| **Peak Virtual Users** | **2,000+ Concurrent Users** | High Traffic Burst |
-| **Average Latency** | **8 ms** | Sub-50ms Benchmark |
-| **p(95) Latency** | **18 ms** | Ultra-Fast Response |
-| **p(99) Latency** | **35 ms** | SLA Compliant |
-| **Stock Over-Selling Count** | **0 Items** | Zero Deficit Proof |
-
----
+See [BENCHMARK.md](BENCHMARK.md) for reproducible commands, expected correctness checks, and the distinction between unit-level concurrency tests and end-to-end k6 measurements. Throughput numbers are not claimed until raw k6 output and test-machine details are recorded.
 
 ## 🤝 Git Workflow & Semantic Commits
 
@@ -204,4 +194,3 @@ This repository adheres to standard Conventional Commit guidelines:
 - `fix:` Bug fixes (e.g. `fix: handle SQS message delete retry logic`)
 - `refactor:` Code restructuring without changing behavior
 - `docs:` Documentation updates
-

@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http/httptest"
 	"testing"
 
 	"flashsale-go/internal/delivery/http/handler"
 	"flashsale-go/internal/domain"
+	"flashsale-go/internal/usecase"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/stretchr/testify/assert"
@@ -110,7 +110,7 @@ func TestOrderHandler_CreateFlashSaleOrder_OutOfStock(t *testing.T) {
 	}
 	body, _ := json.Marshal(dto)
 
-	mockUsecase.On("CreateFlashSaleOrder", mock.Anything, "user-test-123", &dto).Return(nil, errors.New("product out of stock"))
+	mockUsecase.On("CreateFlashSaleOrder", mock.Anything, "user-test-123", &dto).Return(nil, usecase.ErrOutOfStock)
 
 	req := httptest.NewRequest("POST", "/orders/flash-sale", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -125,7 +125,11 @@ func TestOrderHandler_GetOrderByID_Success(t *testing.T) {
 	orderHandler := handler.NewOrderHandler(mockUsecase)
 
 	app := fiber.New()
-	app.Get("/orders/:id", orderHandler.GetOrderByID)
+	app.Get("/orders/:id", func(c *fiber.Ctx) error {
+		c.Locals("userID", "user-123")
+		c.Locals("userRole", "customer")
+		return orderHandler.GetOrderByID(c)
+	})
 
 	mockUsecase.On("GetOrderByID", mock.Anything, "ORD-123").Return(&domain.Order{
 		OrderID:   "ORD-123",
@@ -139,4 +143,27 @@ func TestOrderHandler_GetOrderByID_Success(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, fiber.StatusOK, resp.StatusCode)
+}
+
+func TestOrderHandler_StreamOrderStatus_HidesOtherUsersOrder(t *testing.T) {
+	mockUsecase := new(MockOrderUsecase)
+	orderHandler := handler.NewOrderHandler(mockUsecase)
+	app := fiber.New()
+	app.Get("/orders/:id/stream", func(c *fiber.Ctx) error {
+		c.Locals("userID", "user-other")
+		c.Locals("userRole", "customer")
+		return orderHandler.StreamOrderStatus(c)
+	})
+
+	mockUsecase.On("GetOrderByID", mock.Anything, "ORD-private").Return(&domain.Order{
+		OrderID: "ORD-private",
+		UserID:  "user-owner",
+	}, nil)
+
+	req := httptest.NewRequest("GET", "/orders/ORD-private/stream", nil)
+	resp, err := app.Test(req)
+
+	assert.NoError(t, err)
+	assert.Equal(t, fiber.StatusNotFound, resp.StatusCode)
+	mockUsecase.AssertNotCalled(t, "SubscribeOrderStatusStream", mock.Anything, mock.Anything)
 }

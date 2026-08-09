@@ -2,6 +2,8 @@ package queue
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 
 	"flashsale-go/internal/domain"
@@ -22,12 +24,17 @@ func NewMemoryQueueRepository(bufferSize int) domain.QueueRepository {
 }
 
 func (r *memoryQueueRepository) PublishOrderEvent(ctx context.Context, event *domain.OrderEventPayload) error {
+	if event == nil {
+		return errors.New("order event is required")
+	}
 	select {
+	case <-ctx.Done():
+		return ctx.Err()
 	case r.ch <- event:
 		return nil
 	default:
 		log.Printf("[MemoryQueue Warning] Queue buffer full, order dropped: %s", event.OrderID)
-		return nil
+		return fmt.Errorf("memory queue is full for order %s", event.OrderID)
 	}
 }
 

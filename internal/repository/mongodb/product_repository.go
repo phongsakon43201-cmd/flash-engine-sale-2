@@ -32,7 +32,11 @@ func (r *productRepository) CreateProduct(ctx context.Context, product *domain.P
 		return nil, fmt.Errorf("failed to insert product: %w", err)
 	}
 
-	product.ID = res.InsertedID.(primitive.ObjectID)
+	insertedID, ok := res.InsertedID.(primitive.ObjectID)
+	if !ok {
+		return nil, errors.New("MongoDB returned an unexpected product ID type")
+	}
+	product.ID = insertedID
 	return product, nil
 }
 

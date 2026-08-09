@@ -1,34 +1,35 @@
 # Build Stage
-FROM golang:1.22-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 
 # Copy dependency manifests
-COPY go.mod ./
-RUN go mod download || true
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
 
 # Copy source code
 COPY . .
 
 # Build API binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/api-bin ./cmd/api/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/api-bin ./cmd/api
 
 # Build Worker binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/worker-bin ./cmd/worker/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/worker-bin ./cmd/worker
 
 # Production API Stage
-FROM alpine:latest AS api
-RUN apk add --no-cache ca-certificates tzdata
+FROM alpine:3.22 AS api
+RUN apk add --no-cache ca-certificates tzdata && addgroup -S app && adduser -S -G app app
 WORKDIR /app
-COPY --from=builder /app/api-bin /app/api-bin
-COPY --from=builder /app/.env /app/.env
+COPY --from=builder --chown=app:app /app/api-bin /app/api-bin
+COPY --from=builder --chown=app:app /app/web /app/web
+USER app
 EXPOSE 8080
 CMD ["/app/api-bin"]
 
 # Production Worker Stage
-FROM alpine:latest AS worker
-RUN apk add --no-cache ca-certificates tzdata
+FROM alpine:3.22 AS worker
+RUN apk add --no-cache ca-certificates tzdata && addgroup -S app && adduser -S -G app app
 WORKDIR /app
-COPY --from=builder /app/worker-bin /app/worker-bin
-COPY --from=builder /app/.env /app/.env
+COPY --from=builder --chown=app:app /app/worker-bin /app/worker-bin
+USER app
 CMD ["/app/worker-bin"]

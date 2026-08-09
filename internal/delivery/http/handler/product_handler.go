@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"errors"
+	"log"
+
 	"flashsale-go/internal/domain"
 	"flashsale-go/internal/usecase"
 	"flashsale-go/pkg/utils"
@@ -38,7 +41,11 @@ func (h *ProductHandler) CreateProduct(c *fiber.Ctx) error {
 
 	product, err := h.productUsecase.CreateProduct(c.Context(), &dto)
 	if err != nil {
-		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to create product", err.Error())
+		if errors.Is(err, usecase.ErrInvalidProduct) {
+			return utils.JSONError(c, fiber.StatusBadRequest, "Invalid product", err.Error())
+		}
+		log.Printf("Failed to create product: %v", err)
+		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to create product", "Unable to create product")
 	}
 
 	return utils.JSONSuccess(c, fiber.StatusCreated, "Product created successfully", product)
@@ -105,7 +112,11 @@ func (h *ProductHandler) PrewarmStock(c *fiber.Ctx) error {
 	}
 
 	if err := h.productUsecase.PrewarmStock(c.Context(), dto.ProductID, dto.Stock); err != nil {
-		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to prewarm Redis stock", err.Error())
+		if errors.Is(err, usecase.ErrInvalidPrewarmStock) {
+			return utils.JSONError(c, fiber.StatusBadRequest, "Invalid stock", err.Error())
+		}
+		log.Printf("Failed to prewarm Redis stock: %v", err)
+		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to prewarm Redis stock", "Unable to prewarm stock")
 	}
 
 	return utils.JSONSuccess(c, fiber.StatusOK, "Flash sale stock pre-warmed in Redis successfully", fiber.Map{
@@ -163,7 +174,11 @@ func (h *ProductHandler) GetS3UploadURL(c *fiber.Ctx) error {
 
 	uploadURL, fileURL, err := h.productUsecase.GetPresignedUploadURL(c.Context(), filename, contentType)
 	if err != nil {
-		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to generate presigned upload URL", err.Error())
+		if errors.Is(err, usecase.ErrInvalidUpload) {
+			return utils.JSONError(c, fiber.StatusBadRequest, "Invalid upload request", err.Error())
+		}
+		log.Printf("Failed to generate presigned upload URL: %v", err)
+		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to generate presigned upload URL", "Unable to generate upload URL")
 	}
 
 	return utils.JSONSuccess(c, fiber.StatusOK, "Presigned URL generated", fiber.Map{

@@ -22,6 +22,11 @@ func (m *MockOrderRepository) CreateOrder(ctx context.Context, order *domain.Ord
 	return args.Error(0)
 }
 
+func (m *MockOrderRepository) CreateOrderAndDecrementStock(ctx context.Context, order *domain.Order) (bool, error) {
+	args := m.Called(ctx, order)
+	return args.Bool(0), args.Error(1)
+}
+
 func (m *MockOrderRepository) FindByOrderID(ctx context.Context, orderID string) (*domain.Order, error) {
 	args := m.Called(ctx, orderID)
 	if args.Get(0) == nil {
@@ -141,13 +146,13 @@ func TestCreateFlashSaleOrder_Success(t *testing.T) {
 	}
 
 	// Expectations
-	mockCacheRepo.On("AcquireLock", ctx, mock.Anything, "LOCKED", 10*time.Second).Return(true, nil)
-	mockCacheRepo.On("DecrementStockAtomic", ctx, productID, 1).Return(true, nil)
+	mockCacheRepo.On("AcquireLock", ctx, mock.Anything, mock.Anything, 10*time.Second).Return(true, nil)
 	mockProductRepo.On("FindByID", ctx, productID).Return(&domain.Product{
 		Price:       1000,
 		IsFlashSale: true,
 		FlashPrice:  199,
 	}, nil)
+	mockCacheRepo.On("DecrementStockAtomic", ctx, productID, 1).Return(true, nil)
 	mockQueueRepo.On("PublishOrderEvent", ctx, mock.Anything).Return(nil)
 
 	res, err := orderUsecase.CreateFlashSaleOrder(ctx, userID, dto)
@@ -176,9 +181,15 @@ func TestCreateFlashSaleOrder_OutOfStock(t *testing.T) {
 		Quantity:  1,
 	}
 
-	mockCacheRepo.On("AcquireLock", ctx, mock.Anything, "LOCKED", 10*time.Second).Return(true, nil)
+	mockCacheRepo.On("AcquireLock", ctx, mock.Anything, mock.Anything, 10*time.Second).Return(true, nil)
+	mockProductRepo.On("FindByID", ctx, productID).Return(&domain.Product{
+		Price:       1000,
+		IsFlashSale: true,
+		FlashPrice:  199,
+	}, nil)
 	// Return false for Atomic Decrement indicating 0 stock remaining in Redis
 	mockCacheRepo.On("DecrementStockAtomic", ctx, productID, 1).Return(false, nil)
+	mockCacheRepo.On("ReleaseLock", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	res, err := orderUsecase.CreateFlashSaleOrder(ctx, userID, dto)
 
@@ -203,7 +214,7 @@ func TestCreateFlashSaleOrder_QueuePublishFailure_RollsBackStock(t *testing.T) {
 		Quantity:  1,
 	}
 
-	mockCacheRepo.On("AcquireLock", ctx, mock.Anything, "LOCKED", 10*time.Second).Return(true, nil)
+	mockCacheRepo.On("AcquireLock", ctx, mock.Anything, mock.Anything, 10*time.Second).Return(true, nil)
 	mockCacheRepo.On("DecrementStockAtomic", ctx, productID, 1).Return(true, nil)
 	mockProductRepo.On("FindByID", ctx, productID).Return(&domain.Product{
 		Price:       1000,
@@ -214,6 +225,7 @@ func TestCreateFlashSaleOrder_QueuePublishFailure_RollsBackStock(t *testing.T) {
 	mockQueueRepo.On("PublishOrderEvent", ctx, mock.Anything).Return(assert.AnError)
 	// Verify IncrementStock is called to add +1 back to Redis stock instead of PrewarmStock!
 	mockCacheRepo.On("IncrementStock", ctx, productID, 1).Return(nil)
+	mockCacheRepo.On("ReleaseLock", mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	res, err := orderUsecase.CreateFlashSaleOrder(ctx, userID, dto)
 
@@ -222,4 +234,55 @@ func TestCreateFlashSaleOrder_QueuePublishFailure_RollsBackStock(t *testing.T) {
 	assert.Contains(t, err.Error(), "failed to process order queue")
 	mockCacheRepo.AssertExpectations(t)
 	mockQueueRepo.AssertExpectations(t)
+}
+
+func TestProcessOrderFromQueue_RetriesAfterTransientTransactionFailure(t *testing.T) {
+	ctx := context.Background()
+	mockOrderRepo := new(MockOrderRepository)
+	mockProductRepo := new(MockProductRepository)
+	mockCacheRepo := new(MockCacheRepository)
+	mockQueueRepo := new(MockQueueRepository)
+	orderUsecase := usecase.NewOrderUsecase(mockOrderRepo, mockProductRepo, mockCacheRepo, mockQueueRepo)
+
+	event := &domain.OrderEventPayload{
+		OrderID:   "ORD-retry",
+		UserID:    "user-123",
+		ProductID: "60d5ecb8b5c9c22b9c8b4567",
+		Quantity:  1,
+		Price:     199,
+		Timestamp: time.Now(),
+	}
+
+	mockOrderRepo.On("CreateOrderAndDecrementStock", ctx, mock.Anything).Return(false, assert.AnError).Once()
+	mockOrderRepo.On("CreateOrderAndDecrementStock", ctx, mock.Anything).Return(true, nil).Once()
+	mockCacheRepo.On("PublishEvent", ctx, "order:status:ORD-retry", string(domain.OrderStatusCompleted)).Return(nil).Once()
+
+	assert.Error(t, orderUsecase.ProcessOrderFromQueue(ctx, event))
+	assert.NoError(t, orderUsecase.ProcessOrderFromQueue(ctx, event))
+	mockOrderRepo.AssertExpectations(t)
+	mockCacheRepo.AssertExpectations(t)
+}
+
+func TestProcessOrderFromQueue_DuplicateIsNoOp(t *testing.T) {
+	ctx := context.Background()
+	mockOrderRepo := new(MockOrderRepository)
+	mockProductRepo := new(MockProductRepository)
+	mockCacheRepo := new(MockCacheRepository)
+	mockQueueRepo := new(MockQueueRepository)
+	orderUsecase := usecase.NewOrderUsecase(mockOrderRepo, mockProductRepo, mockCacheRepo, mockQueueRepo)
+
+	event := &domain.OrderEventPayload{
+		OrderID:   "ORD-existing",
+		UserID:    "user-123",
+		ProductID: "60d5ecb8b5c9c22b9c8b4567",
+		Quantity:  1,
+		Price:     199,
+		Timestamp: time.Now(),
+	}
+	mockOrderRepo.On("CreateOrderAndDecrementStock", ctx, mock.Anything).Return(false, nil).Once()
+	mockCacheRepo.On("PublishEvent", ctx, "order:status:ORD-existing", string(domain.OrderStatusCompleted)).Return(nil).Once()
+
+	assert.NoError(t, orderUsecase.ProcessOrderFromQueue(ctx, event))
+	mockOrderRepo.AssertExpectations(t)
+	mockCacheRepo.AssertExpectations(t)
 }

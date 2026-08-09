@@ -41,6 +41,9 @@ import (
 // @description Type "Bearer <Firebase-JWT-Token>" to authenticate protected endpoints.
 func main() {
 	cfg := config.LoadConfig()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
+	}
 
 	log.Printf("Starting %s in %s mode...", cfg.AppName, cfg.Env)
 
@@ -49,6 +52,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("MongoDB initialization failed: %v", err)
 	}
+	defer func() {
+		if err := mongoClient.Client.Disconnect(context.Background()); err != nil {
+			log.Printf("MongoDB disconnect failed: %v", err)
+		}
+	}()
 
 	// 2. Initialize Redis Client
 	redisClient := redis.NewClient(&redis.Options{
@@ -56,13 +64,17 @@ func main() {
 		Password: cfg.RedisPassword,
 		DB:       0,
 	})
+	defer func() { _ = redisClient.Close() }()
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		log.Printf("Warning: Redis connection ping failed: %v. Continuing...", err)
 	}
 
 	// 3. Initialize Repositories
 	productDBRepo := mongoRepo.NewProductRepository(mongoClient.Database)
-	orderDBRepo := mongoRepo.NewOrderRepository(mongoClient.Database)
+	orderDBRepo, err := mongoRepo.NewOrderRepository(mongoClient.Database)
+	if err != nil {
+		log.Fatalf("Order repository initialization failed: %v", err)
+	}
 	cacheRepo := redisRepo.NewRedisRepository(redisClient)
 
 	sqsQueueRepo, err := awsRepo.NewSQSRepository(
@@ -87,7 +99,10 @@ func main() {
 		log.Printf("Warning: AWS S3 initialization failed: %v", err)
 	}
 
-	authClient := firebaseRepo.NewAuthClient(cfg.FirebaseDevMode)
+	authClient, err := firebaseRepo.NewAuthClient(context.Background(), cfg.FirebaseDevMode, cfg.FirebaseCredsPath)
+	if err != nil {
+		log.Fatalf("Firebase initialization failed: %v", err)
+	}
 
 	// 4. Initialize UseCases
 	authUsecase := usecase.NewAuthUsecase(authClient)
@@ -101,22 +116,28 @@ func main() {
 		WriteTimeout: 10 * time.Second,
 	})
 
-	deliveryHTTP.SetupRouter(app, productUsecase, orderUsecase, authUsecase)
+	deliveryHTTP.SetupRouter(app, productUsecase, orderUsecase, authUsecase, cfg.AllowedOrigins)
 
-	// 6. Graceful Shutdown Listener
+	// 6. Serve until startup fails or a shutdown signal is received.
+	serverErrors := make(chan error, 1)
 	go func() {
-		if err := app.Listen(":" + cfg.Port); err != nil {
-			log.Fatalf("Fiber server failed to listen: %v", err)
-		}
+		serverErrors <- app.Listen(":" + cfg.Port)
 	}()
 
 	log.Printf("Server successfully listening on port %s", cfg.Port)
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-	<-quit
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	select {
+	case err := <-serverErrors:
+		log.Printf("Fiber server stopped unexpectedly: %v", err)
+		return
+	case <-shutdownCtx.Done():
+	}
 
 	log.Println("Shutting down API server gracefully...")
-	_ = app.Shutdown()
+	if err := app.ShutdownWithTimeout(10 * time.Second); err != nil {
+		log.Printf("API server shutdown failed: %v", err)
+	}
 	log.Println("API Server gracefully stopped.")
 }
