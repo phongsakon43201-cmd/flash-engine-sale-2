@@ -10,15 +10,17 @@ import (
 
 	_ "flashsale-go/docs"
 	deliveryHTTP "flashsale-go/internal/delivery/http"
+	"flashsale-go/internal/domain"
 	awsRepo "flashsale-go/internal/repository/aws"
 	firebaseRepo "flashsale-go/internal/repository/firebase"
 	mongoRepo "flashsale-go/internal/repository/mongodb"
+	queueRepo "flashsale-go/internal/repository/queue"
 	redisRepo "flashsale-go/internal/repository/redis"
+	storageRepo "flashsale-go/internal/repository/storage"
 	"flashsale-go/internal/usecase"
 	"flashsale-go/pkg/config"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/redis/go-redis/v9"
 )
 
 // @title Flash Sale Engine API
@@ -59,11 +61,10 @@ func main() {
 	}()
 
 	// 2. Initialize Redis Client
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     cfg.RedisAddr,
-		Password: cfg.RedisPassword,
-		DB:       0,
-	})
+	redisClient, err := redisRepo.NewClient(cfg.RedisURL, cfg.RedisAddr, cfg.RedisPassword)
+	if err != nil {
+		log.Fatalf("Redis initialization failed: %v", err)
+	}
 	defer func() { _ = redisClient.Close() }()
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		log.Printf("Warning: Redis connection ping failed: %v. Continuing...", err)
@@ -77,26 +78,40 @@ func main() {
 	}
 	cacheRepo := redisRepo.NewRedisRepository(redisClient)
 
-	sqsQueueRepo, err := awsRepo.NewSQSRepository(
-		cfg.AWSRegion,
-		cfg.AWSAccessKeyID,
-		cfg.AWSSecretAccessKey,
-		cfg.AWSEndpoint,
-		cfg.AWSSQSQueueURL,
-	)
-	if err != nil {
-		log.Fatalf("AWS SQS initialization failed: %v", err)
+	var queueRepository domain.QueueRepository
+	switch cfg.QueueDriver {
+	case "memory":
+		queueRepository = queueRepo.NewMemoryQueueRepository(1000)
+		log.Println("Using in-memory order queue; queued work is not durable across restarts")
+	case "sqs":
+		queueRepository, err = awsRepo.NewSQSRepository(
+			cfg.AWSRegion,
+			cfg.AWSAccessKeyID,
+			cfg.AWSSecretAccessKey,
+			cfg.AWSEndpoint,
+			cfg.AWSSQSQueueURL,
+		)
+		if err != nil {
+			log.Fatalf("AWS SQS initialization failed: %v", err)
+		}
 	}
 
-	s3StorageRepo, err := awsRepo.NewS3Repository(
-		cfg.AWSRegion,
-		cfg.AWSAccessKeyID,
-		cfg.AWSSecretAccessKey,
-		cfg.AWSEndpoint,
-		cfg.AWSS3Bucket,
-	)
-	if err != nil {
-		log.Printf("Warning: AWS S3 initialization failed: %v", err)
+	var storageRepository domain.StorageRepository
+	switch cfg.StorageDriver {
+	case "disabled":
+		storageRepository = storageRepo.NewDisabledRepository()
+		log.Println("Object storage uploads are disabled for this deployment")
+	case "s3":
+		storageRepository, err = awsRepo.NewS3Repository(
+			cfg.AWSRegion,
+			cfg.AWSAccessKeyID,
+			cfg.AWSSecretAccessKey,
+			cfg.AWSEndpoint,
+			cfg.AWSS3Bucket,
+		)
+		if err != nil {
+			log.Fatalf("AWS S3 initialization failed: %v", err)
+		}
 	}
 
 	authClient, err := firebaseRepo.NewAuthClient(context.Background(), cfg.FirebaseDevMode, cfg.FirebaseCredsPath)
@@ -106,8 +121,21 @@ func main() {
 
 	// 4. Initialize UseCases
 	authUsecase := usecase.NewAuthUsecase(authClient)
-	productUsecase := usecase.NewProductUsecase(productDBRepo, cacheRepo, s3StorageRepo)
-	orderUsecase := usecase.NewOrderUsecase(orderDBRepo, productDBRepo, cacheRepo, sqsQueueRepo)
+	productUsecase := usecase.NewProductUsecase(productDBRepo, cacheRepo, storageRepository)
+	orderUsecase := usecase.NewOrderUsecase(orderDBRepo, productDBRepo, cacheRepo, queueRepository)
+
+	runtimeCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if cfg.QueueDriver == "memory" {
+		go func() {
+			err := queueRepository.ReceiveOrderEvents(runtimeCtx, func(event *domain.OrderEventPayload) error {
+				return orderUsecase.ProcessOrderFromQueue(runtimeCtx, event)
+			})
+			if err != nil {
+				log.Printf("In-memory order worker stopped with error: %v", err)
+			}
+		}()
+	}
 
 	// 5. Setup Fiber HTTP App
 	app := fiber.New(fiber.Config{
@@ -126,13 +154,11 @@ func main() {
 
 	log.Printf("Server successfully listening on port %s", cfg.Port)
 
-	shutdownCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 	select {
 	case err := <-serverErrors:
 		log.Printf("Fiber server stopped unexpectedly: %v", err)
 		return
-	case <-shutdownCtx.Done():
+	case <-runtimeCtx.Done():
 	}
 
 	log.Println("Shutting down API server gracefully...")

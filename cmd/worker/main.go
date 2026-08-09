@@ -13,14 +13,15 @@ import (
 	redisRepo "flashsale-go/internal/repository/redis"
 	"flashsale-go/internal/usecase"
 	"flashsale-go/pkg/config"
-
-	"github.com/redis/go-redis/v9"
 )
 
 func main() {
 	cfg := config.LoadConfig()
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
+	}
+	if cfg.QueueDriver != "sqs" {
+		log.Fatalf("The standalone worker requires QUEUE_DRIVER=sqs")
 	}
 
 	log.Println("Starting Flash Sale Async SQS Consumer Worker...")
@@ -37,11 +38,10 @@ func main() {
 	}()
 
 	// 2. Initialize Redis Client
-	redisClient := redis.NewClient(&redis.Options{
-		Addr:     cfg.RedisAddr,
-		Password: cfg.RedisPassword,
-		DB:       0,
-	})
+	redisClient, err := redisRepo.NewClient(cfg.RedisURL, cfg.RedisAddr, cfg.RedisPassword)
+	if err != nil {
+		log.Fatalf("[Worker] Redis initialization failed: %v", err)
+	}
 	defer func() { _ = redisClient.Close() }()
 
 	// 3. Initialize Repositories

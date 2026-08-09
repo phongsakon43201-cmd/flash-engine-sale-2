@@ -33,3 +33,6 @@ WORKDIR /app
 COPY --from=builder --chown=app:app /app/worker-bin /app/worker-bin
 USER app
 CMD ["/app/worker-bin"]
+
+# Default image target for platforms that do not expose a Docker build-target option.
+FROM api AS final

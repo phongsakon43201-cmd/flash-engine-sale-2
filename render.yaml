@@ -1,0 +1,38 @@
+services:
+  - type: keyvalue
+    name: flashsale-redis
+    plan: free
+    region: singapore
+    ipAllowList: []
+    maxmemoryPolicy: allkeys-lru
+
+  - type: web
+    name: flash-engine-sale-2
+    runtime: docker
+    plan: free
+    region: singapore
+    repo: https://github.com/phongsakon43201-cmd/flash-engine-sale-2
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: ENV
+        value: development
+      - key: APP_NAME
+        value: flashsale-engine-demo
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB_NAME
+        value: flashsale_db
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: flashsale-redis
+          property: connectionString
+      - key: QUEUE_DRIVER
+        value: memory
+      - key: STORAGE_DRIVER
+        value: disabled
+      - key: FIREBASE_DEV_MODE
+        value: "true"

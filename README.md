@@ -139,6 +139,24 @@ Response:
 
 ---
 
+## Free Demo Deployment (Render + MongoDB Atlas)
+
+The repository includes a `render.yaml` Blueprint for a no-cost portfolio/demo deployment:
+
+- one free Render web service for the API and embedded in-memory order worker;
+- one free Render Key Value instance for Redis-compatible stock and pub/sub operations;
+- one MongoDB Atlas Free cluster supplied through `MONGO_URI`.
+
+### Deploy
+
+1. Create a MongoDB Atlas Free cluster, database user, and network access rule for the Render service.
+2. Copy the Atlas `mongodb+srv://...` connection string.
+3. In Render, choose **New > Blueprint**, connect this repository, and select `render.yaml`.
+4. Enter the Atlas connection string when Render prompts for `MONGO_URI`, then apply the Blueprint.
+5. Open the generated service URL and verify `/health`.
+
+Render automatically supplies `PORT` and `RENDER_EXTERNAL_HOSTNAME`; the application uses the latter as its default CORS origin. The free-demo settings intentionally use `FIREBASE_DEV_MODE=true`, disable S3 uploads, and keep queued events only in process memory. Use mock bearer tokens only with non-sensitive demo data. Orders that are still queued can be lost if the free service restarts or spins down. For production, use `ENV=production`, Firebase credentials, `QUEUE_DRIVER=sqs`, `STORAGE_DRIVER=s3`, and a separately deployed worker.
+
 ---
 
 ## 📊 API Documentation & Monitoring Portals
