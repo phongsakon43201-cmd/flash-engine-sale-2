@@ -84,6 +84,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (err) {
             logToConsole(`Could not connect to API server (${err.message}). Pre-warming offline demo state.`, 'error');
+            // The demo starts with a placeholder product ID. If MongoDB is
+            // reachable but the initial product lookup fails transiently, try
+            // creating the demo product before polling Redis; otherwise the
+            // Pre-warm button would send a request for a non-existent product.
+            await createDemoProduct();
         }
         await fetchLiveStock();
     }
