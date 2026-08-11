@@ -140,11 +140,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // API: Pre-warm Stock into Redis
-    async function prewarmStock() {
+    async function prewarmStock(retried = false) {
         const count = Number.parseInt(prewarmInput.value, 10);
         if (!Number.isInteger(count) || count < 0) {
             logToConsole('Stock must be a non-negative whole number.', 'error');
             return;
+        }
+        if (!retried && currentStock === 0) {
+            logToConsole('Current demo product is exhausted; creating a fresh demo product...', 'info');
+            await createDemoProduct();
+            return prewarmStock(true);
         }
         initialStock = count;
         initialStockDisplay.textContent = count;
