@@ -30,6 +30,7 @@ type Config struct {
 	AWSSQSQueueURL     string
 	FirebaseDevMode    bool
 	FirebaseCredsPath  string
+	FirebaseCredsJSON  string
 	AllowedOrigins     string
 }
 
@@ -43,9 +44,33 @@ func LoadConfig() *Config {
 		allowedOrigins = "https://" + renderHostname
 	}
 
+	env := getEnv("ENV", "development")
+	awsEndpoint := getEnvAllowEmpty("AWS_ENDPOINT", "")
+	awsAccessKeyID := getEnvAllowEmpty("AWS_ACCESS_KEY_ID", "")
+	awsSecretAccessKey := getEnvAllowEmpty("AWS_SECRET_ACCESS_KEY", "")
+	awsSQSQueueURL := getEnvAllowEmpty("AWS_SQS_QUEUE_URL", "")
+	awsS3Bucket := getEnvAllowEmpty("AWS_S3_BUCKET", "")
+	if !strings.EqualFold(env, "production") && awsEndpoint == "" {
+		awsEndpoint = "http://127.0.0.1:4566"
+	}
+	if !strings.EqualFold(env, "production") {
+		if awsAccessKeyID == "" {
+			awsAccessKeyID = "test"
+		}
+		if awsSecretAccessKey == "" {
+			awsSecretAccessKey = "test"
+		}
+		if awsSQSQueueURL == "" {
+			awsSQSQueueURL = "http://127.0.0.1:4566/000000000000/flashsale-order-queue"
+		}
+		if awsS3Bucket == "" {
+			awsS3Bucket = "flashsale-product-images"
+		}
+	}
+
 	return &Config{
 		Port:               port,
-		Env:                getEnv("ENV", "development"),
+		Env:                env,
 		AppName:            getEnv("APP_NAME", "flashsale-engine"),
 		MongoURI:           getEnv("MONGO_URI", "mongodb://root:examplepassword@localhost:27017"),
 		MongoDBName:        getEnv("MONGO_DB_NAME", "flashsale_db"),
@@ -55,13 +80,14 @@ func LoadConfig() *Config {
 		QueueDriver:        strings.ToLower(strings.TrimSpace(getEnv("QUEUE_DRIVER", "sqs"))),
 		StorageDriver:      strings.ToLower(strings.TrimSpace(getEnv("STORAGE_DRIVER", "s3"))),
 		AWSRegion:          getEnv("AWS_REGION", "us-east-1"),
-		AWSAccessKeyID:     getEnv("AWS_ACCESS_KEY_ID", "test"),
-		AWSSecretAccessKey: getEnv("AWS_SECRET_ACCESS_KEY", "test"),
-		AWSEndpoint:        getEnvAllowEmpty("AWS_ENDPOINT", "http://127.0.0.1:4566"),
-		AWSS3Bucket:        getEnv("AWS_S3_BUCKET", "flashsale-product-images"),
-		AWSSQSQueueURL:     getEnv("AWS_SQS_QUEUE_URL", "http://127.0.0.1:4566/000000000000/flashsale-order-queue"),
+		AWSAccessKeyID:     awsAccessKeyID,
+		AWSSecretAccessKey: awsSecretAccessKey,
+		AWSEndpoint:        awsEndpoint,
+		AWSS3Bucket:        awsS3Bucket,
+		AWSSQSQueueURL:     awsSQSQueueURL,
 		FirebaseDevMode:    getEnvBool("FIREBASE_DEV_MODE", true),
 		FirebaseCredsPath:  getEnvAllowEmpty("FIREBASE_CREDENTIALS_PATH", ""),
+		FirebaseCredsJSON:  getEnvAllowEmpty("FIREBASE_CREDENTIALS_JSON", ""),
 		AllowedOrigins:     getEnv("ALLOWED_ORIGINS", allowedOrigins),
 	}
 }
@@ -102,6 +128,15 @@ func (c *Config) Validate() error {
 		}
 		if strings.Contains(c.AllowedOrigins, "*") {
 			return errors.New("ALLOWED_ORIGINS must not be '*' in production")
+		}
+		if strings.TrimSpace(c.FirebaseCredsPath) == "" && strings.TrimSpace(c.FirebaseCredsJSON) == "" {
+			return errors.New("FIREBASE_CREDENTIALS_PATH or FIREBASE_CREDENTIALS_JSON is required in production")
+		}
+		if (queueDriver == "sqs" || storageDriver == "s3") && (strings.TrimSpace(c.AWSAccessKeyID) == "" || strings.TrimSpace(c.AWSSecretAccessKey) == "") {
+			return errors.New("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required for production AWS drivers")
+		}
+		if storageDriver == "s3" && strings.TrimSpace(c.AWSS3Bucket) == "" {
+			return errors.New("AWS_S3_BUCKET is required when STORAGE_DRIVER=s3")
 		}
 	}
 

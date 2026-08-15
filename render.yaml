@@ -1,38 +1,66 @@
 services:
   - type: keyvalue
     name: flashsale-redis
-    plan: free
+    plan: starter
     region: singapore
     ipAllowList: []
-    maxmemoryPolicy: allkeys-lru
+    maxmemoryPolicy: noeviction
 
   - type: web
     name: flash-engine-sale-2
     runtime: docker
-    plan: free
+    plan: starter
     region: singapore
     repo: https://github.com/phongsakon43201-cmd/flash-engine-sale-2
     branch: main
+    autoDeploy: true
     dockerfilePath: ./Dockerfile
     dockerContext: .
-    healthCheckPath: /health
-    envVars:
+    healthCheckPath: /ready
+    envVars: &appEnv
       - key: ENV
-        value: development
+        value: production
       - key: APP_NAME
-        value: flashsale-engine-demo
+        value: flashsale-engine
       - key: MONGO_URI
         sync: false
       - key: MONGO_DB_NAME
-        value: flashsale_db
+        value: flashsale
       - key: REDIS_URL
         fromService:
           type: keyvalue
           name: flashsale-redis
           property: connectionString
       - key: QUEUE_DRIVER
-        value: memory
+        value: sqs
       - key: STORAGE_DRIVER
-        value: disabled
+        value: s3
       - key: FIREBASE_DEV_MODE
-        value: "true"
+        value: "false"
+      - key: FIREBASE_CREDENTIALS_JSON
+        sync: false
+      - key: AWS_REGION
+        value: ap-southeast-1
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_SQS_QUEUE_URL
+        sync: false
+      - key: AWS_S3_BUCKET
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+
+  - type: worker
+    name: flashsale-worker
+    runtime: docker
+    plan: starter
+    region: singapore
+    repo: https://github.com/phongsakon43201-cmd/flash-engine-sale-2
+    branch: main
+    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    dockerCommand: /app/worker-bin
+    envVars: *appEnv

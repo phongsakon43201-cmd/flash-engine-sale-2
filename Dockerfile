@@ -21,6 +21,7 @@ FROM alpine:3.22 AS api
 RUN apk add --no-cache ca-certificates tzdata && addgroup -S app && adduser -S -G app app
 WORKDIR /app
 COPY --from=builder --chown=app:app /app/api-bin /app/api-bin
+COPY --from=builder --chown=app:app /app/worker-bin /app/worker-bin
 COPY --from=builder --chown=app:app /app/web /app/web
 USER app
 EXPOSE 8080

@@ -41,6 +41,19 @@
             </div>
         </header>
 
+        <section class="card auth-card" style="margin: 18px 0;">
+            <div class="card-header">
+                <h2>Firebase Authentication</h2>
+                <span class="badge badge-tech">Production JWT</span>
+            </div>
+            <p class="product-desc">Paste a Firebase ID token to place orders or use admin actions. The token is stored only in this browser.</p>
+            <div class="input-group">
+                <input type="password" id="authTokenInput" placeholder="Firebase ID token" autocomplete="off" style="flex: 1;">
+                <button class="btn btn-secondary" id="btnSaveToken">Save token</button>
+                <button class="btn btn-outline" id="btnClearToken">Clear token</button>
+            </div>
+        </section>
+
         <!-- Metrics Overview Grid -->
         <div class="metrics-grid">
             <div class="metric-card">

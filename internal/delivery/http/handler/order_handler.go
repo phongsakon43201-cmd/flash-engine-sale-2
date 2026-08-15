@@ -123,7 +123,8 @@ func (h *OrderHandler) StreamOrderStatus(c *fiber.Ctx) error {
 
 	ch, cancel, err := h.orderUsecase.SubscribeOrderStatusStream(c.Context(), orderID)
 	if err != nil {
-		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to subscribe order stream", err.Error())
+		log.Printf("Failed to subscribe order stream for %s: %v", orderID, err)
+		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to subscribe order stream", "Unable to subscribe to order updates")
 	}
 
 	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {

@@ -70,7 +70,8 @@ func (h *ProductHandler) GetProductByID(c *fiber.Ctx) error {
 
 	product, err := h.productUsecase.GetProductByID(c.Context(), id)
 	if err != nil {
-		return utils.JSONError(c, fiber.StatusNotFound, "Product not found", err.Error())
+		log.Printf("Failed to fetch product %s: %v", id, err)
+		return utils.JSONError(c, fiber.StatusNotFound, "Product not found", "The requested product was not found")
 	}
 
 	return utils.JSONSuccess(c, fiber.StatusOK, "Product fetched successfully", product)
@@ -87,7 +88,8 @@ func (h *ProductHandler) GetProductByID(c *fiber.Ctx) error {
 func (h *ProductHandler) ListProducts(c *fiber.Ctx) error {
 	products, err := h.productUsecase.ListProducts(c.Context())
 	if err != nil {
-		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to fetch products", err.Error())
+		log.Printf("Failed to fetch products: %v", err)
+		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to fetch products", "Unable to load products")
 	}
 
 	return utils.JSONSuccess(c, fiber.StatusOK, "Products list fetched successfully", products)
@@ -143,7 +145,8 @@ func (h *ProductHandler) GetRedisStock(c *fiber.Ctx) error {
 
 	stock, err := h.productUsecase.GetRedisStock(c.Context(), id)
 	if err != nil {
-		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to get Redis stock", err.Error())
+		log.Printf("Failed to fetch Redis stock for %s: %v", id, err)
+		return utils.JSONError(c, fiber.StatusInternalServerError, "Failed to get Redis stock", "Unable to load stock")
 	}
 
 	return utils.JSONSuccess(c, fiber.StatusOK, "Redis stock fetched", fiber.Map{

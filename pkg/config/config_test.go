@@ -32,6 +32,19 @@ func TestProductionRejectsWildcardCORS(t *testing.T) {
 	assert.ErrorContains(t, cfg.Validate(), "ALLOWED_ORIGINS")
 }
 
+func TestProductionRequiresRealCredentials(t *testing.T) {
+	cfg := validConfig()
+	cfg.Env = "production"
+	cfg.FirebaseDevMode = false
+	assert.ErrorContains(t, cfg.Validate(), "FIREBASE_CREDENTIALS")
+
+	cfg.FirebaseCredsJSON = `{"type":"service_account"}`
+	cfg.AWSAccessKeyID = "real-access-key"
+	cfg.AWSSecretAccessKey = "real-secret-key"
+	cfg.AWSS3Bucket = "flashsale-production"
+	assert.NoError(t, cfg.Validate())
+}
+
 func TestMemoryQueueDoesNotRequireSQS(t *testing.T) {
 	cfg := validConfig()
 	cfg.QueueDriver = "memory"
