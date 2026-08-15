@@ -114,7 +114,7 @@ func main() {
 		}
 	}
 
-	authClient, err := firebaseRepo.NewAuthClient(context.Background(), cfg.FirebaseDevMode, cfg.FirebaseCredsPath)
+	authClient, err := firebaseRepo.NewAuthClient(context.Background(), cfg.FirebaseDevMode, cfg.FirebaseCredsPath, cfg.FirebaseCredsJSON)
 	if err != nil {
 		log.Fatalf("Firebase initialization failed: %v", err)
 	}
@@ -140,11 +140,23 @@ func main() {
 	// 5. Setup Fiber HTTP App
 	app := fiber.New(fiber.Config{
 		AppName:      cfg.AppName,
+		BodyLimit:    2 * 1024 * 1024,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	})
 
 	deliveryHTTP.SetupRouter(app, productUsecase, orderUsecase, authUsecase, cfg.AllowedOrigins)
+	app.Get("/ready", func(c *fiber.Ctx) error {
+		ctx, cancel := context.WithTimeout(c.Context(), 2*time.Second)
+		defer cancel()
+		if err := mongoClient.Client.Ping(ctx, nil); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "not_ready", "dependency": "mongodb"})
+		}
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "not_ready", "dependency": "redis"})
+		}
+		return c.JSON(fiber.Map{"status": "ready"})
+	})
 
 	// 6. Serve until startup fails or a shutdown signal is received.
 	serverErrors := make(chan error, 1)

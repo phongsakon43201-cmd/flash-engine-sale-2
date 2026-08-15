@@ -48,6 +48,8 @@ func SetupRouter(
 	})
 
 	api := app.Group("/api/v1")
+	// Apply a coarse per-IP API limit before route-specific protections.
+	api.Use(middleware.NewRateLimiter(300, 60))
 
 	// Handlers
 	productHandler := handler.NewProductHandler(productUsecase)

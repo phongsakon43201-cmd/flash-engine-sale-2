@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"flashsale-go/internal/domain"
 )
@@ -49,8 +50,18 @@ func (r *memoryQueueRepository) ReceiveOrderEvents(ctx context.Context, handler 
 			if !ok {
 				return nil
 			}
-			if err := handler(event); err != nil {
-				log.Printf("[MemoryQueue Error] Failed processing order %s: %v", event.OrderID, err)
+			var err error
+			for attempt := 1; attempt <= 3; attempt++ {
+				err = handler(event)
+				if err == nil {
+					break
+				}
+				if attempt < 3 {
+					time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+				}
+			}
+			if err != nil {
+				log.Printf("[MemoryQueue Error] Failed processing order %s after retries: %v", event.OrderID, err)
 			}
 		}
 	}

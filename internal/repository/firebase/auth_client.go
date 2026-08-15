@@ -23,7 +23,7 @@ type AuthClient struct {
 	client  *adminauth.Client
 }
 
-func NewAuthClient(ctx context.Context, devMode bool, credentialsPath string) (*AuthClient, error) {
+func NewAuthClient(ctx context.Context, devMode bool, credentialsPath string, credentialsJSON ...string) (*AuthClient, error) {
 	if devMode {
 		return &AuthClient{devMode: true}, nil
 	}
@@ -31,6 +31,8 @@ func NewAuthClient(ctx context.Context, devMode bool, credentialsPath string) (*
 	var opts []option.ClientOption
 	if credentialsPath != "" {
 		opts = append(opts, option.WithCredentialsFile(credentialsPath))
+	} else if len(credentialsJSON) > 0 && strings.TrimSpace(credentialsJSON[0]) != "" {
+		opts = append(opts, option.WithCredentialsJSON([]byte(credentialsJSON[0])))
 	}
 
 	app, err := adminfirebase.NewApp(ctx, nil, opts...)

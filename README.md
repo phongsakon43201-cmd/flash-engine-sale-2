@@ -139,23 +139,24 @@ Response:
 
 ---
 
-## Free Demo Deployment (Render + MongoDB Atlas)
+## Production Deployment (Render + MongoDB Atlas + AWS)
 
-The repository includes a `render.yaml` Blueprint for a no-cost portfolio/demo deployment:
+`render.yaml` now describes a production topology: one API web service, one SQS worker, and one managed Redis service. It intentionally requires real credentials and does not enable development authentication.
 
-- one free Render web service for the API and embedded in-memory order worker;
-- one free Render Key Value instance for Redis-compatible stock and pub/sub operations;
-- one MongoDB Atlas Free cluster supplied through `MONGO_URI`.
+Before deploying, create:
 
-### Deploy
+- a MongoDB Atlas database user restricted to the application database and the production network;
+- a Firebase service-account JSON document;
+- an AWS SQS queue (with a dead-letter queue) and an S3 bucket with least-privilege IAM credentials;
+- a public frontend/API origin for `ALLOWED_ORIGINS`.
 
-1. Create a MongoDB Atlas Free cluster, database user, and network access rule for the Render service.
-2. Copy the Atlas `mongodb+srv://...` connection string.
-3. In Render, choose **New > Blueprint**, connect this repository, and select `render.yaml`.
-4. Enter the Atlas connection string when Render prompts for `MONGO_URI`, then apply the Blueprint.
-5. Open the generated service URL and verify `/health`.
+In Render, create a Blueprint from this repository and fill every `sync: false` variable. Required secrets include `MONGO_URI`, `FIREBASE_CREDENTIALS_JSON`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SQS_QUEUE_URL`, `AWS_S3_BUCKET`, and `ALLOWED_ORIGINS`.
 
-Render automatically supplies `PORT` and `RENDER_EXTERNAL_HOSTNAME`; the application uses the latter as its default CORS origin. The free-demo settings intentionally use `FIREBASE_DEV_MODE=true`, disable S3 uploads, and keep queued events only in process memory. Use mock bearer tokens only with non-sensitive demo data. Orders that are still queued can be lost if the free service restarts or spins down. For production, use `ENV=production`, Firebase credentials, `QUEUE_DRIVER=sqs`, `STORAGE_DRIVER=s3`, and a separately deployed worker.
+Render supplies `PORT`; the application exposes `/health` for liveness and `/ready` for MongoDB/Redis readiness. Do not set `FIREBASE_DEV_MODE=true`, use mock bearer tokens, or use `0.0.0.0/0` in a production MongoDB network rule.
+
+### Local development
+
+Use `docker compose up --build -d` with `.env.example` values. Local development may use Firebase mock tokens, LocalStack, and the in-memory queue, but those settings must never be copied to a production environment.
 
 ---
 
@@ -166,6 +167,7 @@ Render automatically supplies `PORT` and `RENDER_EXTERNAL_HOSTNAME`; the applica
 | **📖 Interactive Swagger UI** | `http://localhost:8080/swagger/index.html` | Test API endpoints interactively in browser |
 | **📊 Grafana Dashboard** | `http://localhost:3000` *(admin/admin)* | Real-Time HTTP RPS & Latency P95/P99 Dashboards |
 | **📈 Prometheus Metrics** | `http://localhost:8080/metrics` | Prometheus raw metrics endpoint |
+| **Readiness Probe** | `GET /ready` | Verifies MongoDB and Redis connectivity |
 | **📡 SSE Order Stream** | `GET /api/v1/orders/:id/stream` | Real-time Server-Sent Events status feed |
 
 ---
@@ -183,7 +185,7 @@ Render automatically supplies `PORT` and `RENDER_EXTERNAL_HOSTNAME`; the applica
 | `GET` | `/api/v1/orders/:id` | Fetch order details by Order ID | 🔑 |
 | `GET` | `/api/v1/orders/:id/stream` | **Real-Time SSE Order Status Stream** | 🔑 |
 
-> **Note for Dev Testing**: When `FIREBASE_DEV_MODE=true`, use any mock customer ID (for example, `Bearer user-001`). Admin-only endpoints require the `admin:` prefix (for example, `Bearer admin:dashboard`). Development tokens are rejected when `ENV=production`.
+> **Note for Dev Testing**: When `FIREBASE_DEV_MODE=true`, mock tokens may be used locally. Production always requires a Firebase ID token and real service-account credentials.
 
 ---
 

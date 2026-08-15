@@ -15,6 +15,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnSimulate50 = document.getElementById('btnSimulate50');
     const btnSimulate100 = document.getElementById('btnSimulate100');
     const btnClearLogs = document.getElementById('btnClearLogs');
+    const authTokenInput = document.getElementById('authTokenInput');
+    const btnSaveToken = document.getElementById('btnSaveToken');
+    const btnClearToken = document.getElementById('btnClearToken');
     const consoleLogs = document.getElementById('consoleLogs');
 
     // App State
@@ -36,6 +39,21 @@ document.addEventListener('DOMContentLoaded', () => {
         entry.appendChild(document.createTextNode(String(message)));
         consoleLogs.appendChild(entry);
         consoleLogs.scrollTop = consoleLogs.scrollHeight;
+    }
+
+    function getAuthToken() {
+        return sessionStorage.getItem('flashsale_id_token') || '';
+    }
+
+    function getAuthHeaders() {
+        const token = getAuthToken();
+        return token ? { 'Authorization': `Bearer ${token}` } : {};
+    }
+
+    function requireAuth() {
+        if (getAuthToken()) return true;
+        logToConsole('Authentication required. Paste a Firebase ID token before using protected actions.', 'error');
+        return false;
     }
 
     // Helper: Update UI Stock & Meter
@@ -77,18 +95,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.getElementById('productDesc').textContent = prod.description || 'Flash sale product';
                     logToConsole(`Loaded active Flash Sale product: ${prod.title} (ID: ${activeProductID})`, 'system');
                 } else {
-                    await createDemoProduct();
+                    logToConsole('No products are available. An authenticated admin must create one before the sale.', 'error');
                 }
             } else {
-                await createDemoProduct();
+                logToConsole(`Could not load products (HTTP ${res.status}).`, 'error');
             }
         } catch (err) {
-            logToConsole(`Could not connect to API server (${err.message}). Pre-warming offline demo state.`, 'error');
-            // The demo starts with a placeholder product ID. If MongoDB is
-            // reachable but the initial product lookup fails transiently, try
-            // creating the demo product before polling Redis; otherwise the
-            // Pre-warm button would send a request for a non-existent product.
-            await createDemoProduct();
+            logToConsole(`Could not load products from the API (${err.message}).`, 'error');
         }
         await fetchLiveStock();
     }
@@ -100,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer admin:dashboard'
+                    ...getAuthHeaders()
                 },
                 body: JSON.stringify({
                     title: 'iPhone 15 Pro Max 1TB (Titanium)',
@@ -140,17 +153,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // API: Pre-warm Stock into Redis
-    async function prewarmStock(retried = false) {
+    async function prewarmStock() {
         const count = Number.parseInt(prewarmInput.value, 10);
         if (!Number.isInteger(count) || count < 0) {
             logToConsole('Stock must be a non-negative whole number.', 'error');
             return;
         }
-        if (!retried && currentStock === 0) {
-            logToConsole('Current demo product is exhausted; creating a fresh demo product...', 'info');
-            await createDemoProduct();
-            return prewarmStock(true);
-        }
+        if (!requireAuth()) return;
         initialStock = count;
         initialStockDisplay.textContent = count;
 
@@ -161,7 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': 'Bearer admin:dashboard'
+                    ...getAuthHeaders()
                 },
                 body: JSON.stringify({
                     product_id: activeProductID,
@@ -190,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(`/api/v1/orders/${orderID}/stream`, {
                 headers: {
                     'Accept': 'text/event-stream',
-                    'Authorization': `Bearer ${userID}`
+                ...getAuthHeaders()
                 }
             });
             if (!response.ok || !response.body) {
@@ -231,6 +240,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // API: Create Flash Sale Order (Single)
     async function buyFlashSaleOrder(userID = `user-${Math.floor(Math.random() * 1000)}`) {
+        if (!requireAuth()) return { success: false, latency: 0 };
         const startTime = performance.now();
         try {
             const res = await fetch('/api/v1/orders/flash-sale', {
@@ -275,6 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Simulate Concurrency Batch
     async function simulateConcurrency(count) {
+        if (!requireAuth()) return;
         logToConsole(`🔥 Initiating High-Concurrency Rush: Firing ${count} simultaneous Requests...`, 'info');
         const promises = [];
         const runId = Date.now();
@@ -299,6 +310,22 @@ document.addEventListener('DOMContentLoaded', () => {
     btnClearLogs.addEventListener('click', () => {
         consoleLogs.replaceChildren();
         logToConsole('Console cleared.', 'system');
+    });
+    authTokenInput.value = getAuthToken();
+    btnSaveToken.addEventListener('click', () => {
+        const token = authTokenInput.value.trim();
+        if (!token) {
+            logToConsole('A Firebase ID token is required.', 'error');
+            return;
+        }
+        sessionStorage.setItem('flashsale_id_token', token);
+        authTokenInput.value = '';
+        logToConsole('Firebase token saved locally. Protected actions are enabled.', 'success');
+    });
+    btnClearToken.addEventListener('click', () => {
+        sessionStorage.removeItem('flashsale_id_token');
+        authTokenInput.value = '';
+        logToConsole('Firebase token removed from this browser.', 'system');
     });
 
     // Periodic Stock Polling
